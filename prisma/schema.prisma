@@ -1,0 +1,307 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum RolTorneo {
+  ORGANIZADOR
+  CAPITAN
+  STAFF
+  JUGADOR
+}
+
+enum EstadoTorneo {
+  BORRADOR
+  EN_INSCRIPCION
+  EN_CURSO
+  FINALIZADO
+}
+
+enum FormatoTorneo {
+  LIGA
+  COPA
+  GRUPOS
+  ELIMINATORIA
+}
+
+enum EstadoInscripcion {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+}
+
+enum EstadoPartido {
+  PENDIENTE
+  EN_CURSO
+  ESPERANDO_CONFIRMACION
+  EN_DISPUTA
+  CONFIRMADO
+}
+
+enum TipoEvento {
+  GOL
+  ASISTENCIA
+  TARJETA_AMARILLA
+  TARJETA_ROJA
+  CAMBIO
+}
+
+enum TipoNotificacion {
+  PARTIDO_PROGRAMADO
+  RESULTADO_PENDIENTE
+  RESULTADO_CONFIRMADO
+  DISPUTA_ABIERTA
+  DISPUTA_RESUELTA
+  TORNEO_PUBLICADO
+  INSCRIPCION_APROBADA
+  INSCRIPCION_RECHAZADA
+  ROL_ASIGNADO
+}
+
+// ─────────────────────────────────────────
+// USUARIO
+// ─────────────────────────────────────────
+
+model Usuario {
+  id            String   @id @default(uuid())
+  nombre        String
+  email         String   @unique
+  passwordHash  String
+  fotoPerfil    String?
+  zona          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  roles           UsuarioTorneo[]
+  equipos         UsuarioEquipo[]
+  eventosPartido  EventoPartido[]
+  notificaciones  Notificacion[]
+  enlacesInvitacion EnlaceInvitacion[]
+
+  @@map("usuarios")
+}
+
+// ─────────────────────────────────────────
+// TORNEO
+// ─────────────────────────────────────────
+
+model Torneo {
+  id              String        @id @default(uuid())
+  nombre          String
+  descripcion     String?
+  formato         FormatoTorneo
+  maxEquipos      Int
+  estado          EstadoTorneo  @default(BORRADOR)
+  fechaInicio     DateTime
+  fechaFin        DateTime
+  zona            String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relaciones
+  campos          CampoJuego[]
+  participantes   UsuarioTorneo[]
+  equipos         Equipo[]
+  inscripciones   Inscripcion[]
+  partidos        Partido[]
+  notificaciones  Notificacion[]
+  enlacesInvitacion EnlaceInvitacion[]
+
+  @@map("torneos")
+}
+
+// ─────────────────────────────────────────
+// ROL CONTEXTUAL (usuario ↔ torneo)
+// ─────────────────────────────────────────
+
+model UsuarioTorneo {
+  id        String    @id @default(uuid())
+  usuarioId String
+  torneoId  String
+  rol       RolTorneo
+  createdAt DateTime  @default(now())
+
+  usuario   Usuario   @relation(fields: [usuarioId], references: [id])
+  torneo    Torneo    @relation(fields: [torneoId], references: [id])
+
+  @@unique([usuarioId, torneoId])
+  @@map("usuario_torneo")
+}
+
+// ─────────────────────────────────────────
+// CAMPO DE JUEGO
+// ─────────────────────────────────────────
+
+model CampoJuego {
+  id        String   @id @default(uuid())
+  torneoId  String
+  nombre    String
+  direccion String?
+  createdAt DateTime @default(now())
+
+  torneo    Torneo   @relation(fields: [torneoId], references: [id])
+  partidos  Partido[]
+
+  @@map("campos_juego")
+}
+
+// ─────────────────────────────────────────
+// EQUIPO
+// ─────────────────────────────────────────
+
+model Equipo {
+  id        String   @id @default(uuid())
+  torneoId  String
+  nombre    String
+  escudo    String?
+  createdAt DateTime @default(now())
+
+  torneo        Torneo          @relation(fields: [torneoId], references: [id])
+  jugadores     UsuarioEquipo[]
+  inscripcion   Inscripcion?
+  partidosLocal Partido[]       @relation("EquipoLocal")
+  partidosVisitante Partido[]   @relation("EquipoVisitante")
+
+  @@map("equipos")
+}
+
+// ─────────────────────────────────────────
+// USUARIO ↔ EQUIPO
+// ─────────────────────────────────────────
+
+model UsuarioEquipo {
+  id        String   @id @default(uuid())
+  usuarioId String
+  equipoId  String
+  createdAt DateTime @default(now())
+
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  equipo    Equipo   @relation(fields: [equipoId], references: [id])
+
+  @@unique([usuarioId, equipoId])
+  @@map("usuario_equipo")
+}
+
+// ─────────────────────────────────────────
+// INSCRIPCION
+// ─────────────────────────────────────────
+
+model Inscripcion {
+  id        String            @id @default(uuid())
+  torneoId  String
+  equipoId  String            @unique
+  estado    EstadoInscripcion @default(PENDIENTE)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  torneo    Torneo            @relation(fields: [torneoId], references: [id])
+  equipo    Equipo            @relation(fields: [equipoId], references: [id])
+
+  @@map("inscripciones")
+}
+
+// ─────────────────────────────────────────
+// ENLACE DE INVITACION
+// ─────────────────────────────────────────
+
+model EnlaceInvitacion {
+  id         String    @id @default(uuid())
+  torneoId   String
+  creadoPor  String
+  codigo     String    @unique @default(uuid())
+  usos       Int       @default(0)
+  maxUsos    Int?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  torneo     Torneo    @relation(fields: [torneoId], references: [id])
+  usuario    Usuario   @relation(fields: [creadoPor], references: [id])
+
+  @@map("enlaces_invitacion")
+}
+
+// ─────────────────────────────────────────
+// PARTIDO
+// ─────────────────────────────────────────
+
+model Partido {
+  id               String        @id @default(uuid())
+  torneoId         String
+  campoId          String?
+  equipoLocalId    String
+  equipoVisitanteId String
+  fecha            DateTime?
+  estado           EstadoPartido @default(PENDIENTE)
+  ronda            Int?
+  fase             String?
+
+  // Resultado
+  golesLocal       Int?
+  golesVisitante   Int?
+
+  // Confirmacion cruzada
+  confirmadoPorLocal      Boolean @default(false)
+  confirmadoPorVisitante  Boolean @default(false)
+  resultadoDisputado      Boolean @default(false)
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  torneo           Torneo        @relation(fields: [torneoId], references: [id])
+  campo            CampoJuego?   @relation(fields: [campoId], references: [id])
+  equipoLocal      Equipo        @relation("EquipoLocal", fields: [equipoLocalId], references: [id])
+  equipoVisitante  Equipo        @relation("EquipoVisitante", fields: [equipoVisitanteId], references: [id])
+  eventos          EventoPartido[]
+
+  @@map("partidos")
+}
+
+// ─────────────────────────────────────────
+// EVENTO DE PARTIDO
+// ─────────────────────────────────────────
+
+model EventoPartido {
+  id         String     @id @default(uuid())
+  partidoId  String
+  jugadorId  String
+  tipo       TipoEvento
+  minuto     Int?
+  detalle    String?
+  createdAt  DateTime   @default(now())
+
+  partido    Partido    @relation(fields: [partidoId], references: [id])
+  jugador    Usuario    @relation(fields: [jugadorId], references: [id])
+
+  @@map("eventos_partido")
+}
+
+// ─────────────────────────────────────────
+// NOTIFICACION
+// ─────────────────────────────────────────
+
+model Notificacion {
+  id         String           @id @default(uuid())
+  usuarioId  String
+  torneoId   String?
+  tipo       TipoNotificacion
+  mensaje    String
+  leida      Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+
+  usuario    Usuario          @relation(fields: [usuarioId], references: [id])
+  torneo     Torneo?          @relation(fields: [torneoId], references: [id])
+
+  @@map("notificaciones")
+}
+
+
