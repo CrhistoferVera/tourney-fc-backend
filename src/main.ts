@@ -12,6 +12,12 @@ async function bootstrap() {
     transform: true,
   }));
 
+  app.enableCors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
+
   const config = new DocumentBuilder()
     .setTitle('Tourney FC API')
     .setDescription('API REST para la gestión de torneos de fútbol')
