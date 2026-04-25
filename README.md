@@ -1,98 +1,153 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Tourney FC — Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API REST para la gestión de torneos de fútbol, desarrollada con NestJS, Prisma y PostgreSQL.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## Requisitos previos
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- Node.js v18 o superior
+- npm v9 o superior
+- Acceso a la base de datos PostgreSQL del proyecto
 
-## Project setup
+---
+
+## Instalación
 
 ```bash
-$ npm install
+npm install
+npx prisma generate
 ```
 
-## Compile and run the project
+> `prisma generate` es obligatorio después de cada `npm install` porque el cliente de Prisma se genera localmente y no se incluye en el repositorio.
+
+---
+
+## Variables de entorno
+
+Crea un archivo `.env` en la raíz del proyecto con el siguiente contenido:
+
+```env
+DATABASE_URL="postgresql://usuario:contraseña@host:puerto/nombre_db?sslmode=disable"
+JWT_SECRET="un_secreto_largo_y_seguro"
+PORT=3000
+```
+
+Solicita los valores reales al administrador del proyecto. No compartas ni subas el `.env` al repositorio.
+
+---
+
+## Ejecución
 
 ```bash
-# development
-$ npm run start
+# Modo desarrollo con recarga automática
+npm run start:dev
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+# Modo producción
+npm run start:prod
 ```
 
-## Run tests
+---
+
+## Prisma
+
+### Generar el cliente
+
+Debe ejecutarse después de cada `npm install` o cuando se modifique el `schema.prisma`:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npx prisma generate
 ```
 
-## Deployment
+### Aplicar migraciones
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Aplica las migraciones pendientes sobre la base de datos:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# En desarrollo (crea la migración y la aplica)
+npx prisma migrate dev --name nombre_descriptivo
+
+# En producción (solo aplica migraciones existentes)
+npx prisma migrate deploy
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Prisma Studio
 
-## Resources
+Interfaz visual para explorar y editar los datos de la base de datos directamente desde el navegador:
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+npx prisma studio
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+Se abre en `http://localhost:5555` por defecto. Es útil para verificar datos durante el desarrollo, pero no debe usarse para modificar datos en producción.
 
-## Support
+---
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Documentación de la API (Swagger)
 
-## Stay in touch
+Con el servidor corriendo, accede a:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```
+http://localhost:3000/api
+```
 
-## License
+Desde ahí se pueden ver todos los endpoints disponibles, la estructura de los request y response, y probar los endpoints directamente. Los endpoints protegidos requieren un token JWT, que se obtiene desde `POST /auth/login`. En Swagger, usa el botón **Authorize** para ingresar el token.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+---
+
+## Pruebas
+
+### Ejecutar todos los tests
+
+```bash
+npm run test
+```
+
+### Ejecutar en modo watch (se re-ejecutan al guardar cambios)
+
+```bash
+npm run test:watch
+```
+
+### Ver cobertura de código
+
+```bash
+npm run test:cov
+```
+
+### Generar reporte visual HTML
+
+```bash
+npm run test
+```
+
+Después de correr los tests, se genera automáticamente el archivo `test-report/index.html`. Ábrelo en cualquier navegador para ver el resultado de cada prueba de forma visual, incluyendo los que pasaron, los que fallaron y los mensajes de error correspondientes.
+
+> La carpeta `test-report/` está incluida en el `.gitignore` y no se sube al repositorio.
+
+---
+
+## Estructura del proyecto
+
+```
+src/
+  auth/         # Registro e inicio de sesión, guards y estrategia JWT
+  users/        # Gestión del perfil de usuario
+  prisma/       # Servicio y módulo de Prisma
+prisma/
+  schema.prisma # Definición del modelo de datos
+  migrations/   # Historial de migraciones aplicadas
+```
+
+---
+
+## Convención de commits
+
+Se utiliza el estándar Conventional Commits:
+
+```
+feat: nueva funcionalidad
+fix: corrección de error
+docs: cambios en documentación
+refactor: mejora interna sin cambio de funcionalidad
+```
