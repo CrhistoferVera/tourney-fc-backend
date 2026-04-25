@@ -9,7 +9,7 @@ import { UserEntity } from './entities/user.entity';
 @ApiBearerAuth()
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
@@ -48,5 +48,17 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
   findOne(@Param('id') id: string) {
     return this.usersService.findById(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/dashboard')
+  @ApiOperation({
+    summary: 'Dashboard del usuario',
+    description: 'Retorna torneos en los que participa, próximo partido y últimos resultados (HU-4)'
+  })
+  @ApiResponse({ status: 200, description: 'Datos del dashboard' })
+  @ApiResponse({ status: 401, description: 'Token inválido o expirado' })
+  getDashboard(@Request() req: any) {
+    return this.usersService.getDashboard(req.user.id);
   }
 }
