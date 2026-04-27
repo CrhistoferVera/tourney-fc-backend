@@ -132,7 +132,7 @@ model UsuarioTorneo {
   createdAt DateTime  @default(now())
 
   usuario   Usuario   @relation(fields: [usuarioId], references: [id])
-  torneo    Torneo    @relation(fields: [torneoId], references: [id])
+  torneo    Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
 
   @@unique([usuarioId, torneoId])
   @@map("usuario_torneo")
@@ -149,7 +149,7 @@ model CampoJuego {
   direccion String?
   createdAt DateTime @default(now())
 
-  torneo    Torneo   @relation(fields: [torneoId], references: [id])
+  torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)
   partidos  Partido[]
 
   @@map("campos_juego")
@@ -166,7 +166,7 @@ model Equipo {
   escudo    String?
   createdAt DateTime @default(now())
 
-  torneo        Torneo          @relation(fields: [torneoId], references: [id])
+  torneo        Torneo          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
   jugadores     UsuarioEquipo[]
   inscripcion   Inscripcion?
   partidosLocal Partido[]       @relation("EquipoLocal")
@@ -204,7 +204,7 @@ model Inscripcion {
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
-  torneo    Torneo            @relation(fields: [torneoId], references: [id])
+  torneo    Torneo            @relation(fields: [torneoId], references: [id], onDelete: Cascade)
   equipo    Equipo            @relation(fields: [equipoId], references: [id])
 
   @@map("inscripciones")
@@ -224,7 +224,7 @@ model EnlaceInvitacion {
   expiresAt  DateTime?
   createdAt  DateTime  @default(now())
 
-  torneo     Torneo    @relation(fields: [torneoId], references: [id])
+  torneo     Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
   usuario    Usuario   @relation(fields: [creadoPor], references: [id])
 
   @@map("enlaces_invitacion")
@@ -245,11 +245,9 @@ model Partido {
   ronda            Int?
   fase             String?
 
-  // Resultado
   golesLocal       Int?
   golesVisitante   Int?
 
-  // Confirmacion cruzada
   confirmadoPorLocal      Boolean @default(false)
   confirmadoPorVisitante  Boolean @default(false)
   resultadoDisputado      Boolean @default(false)
@@ -257,7 +255,7 @@ model Partido {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  torneo           Torneo        @relation(fields: [torneoId], references: [id])
+  torneo           Torneo        @relation(fields: [torneoId], references: [id], onDelete: Cascade)
   campo            CampoJuego?   @relation(fields: [campoId], references: [id])
   equipoLocal      Equipo        @relation("EquipoLocal", fields: [equipoLocalId], references: [id])
   equipoVisitante  Equipo        @relation("EquipoVisitante", fields: [equipoVisitanteId], references: [id])
@@ -299,7 +297,7 @@ model Notificacion {
   createdAt  DateTime         @default(now())
 
   usuario    Usuario          @relation(fields: [usuarioId], references: [id])
-  torneo     Torneo?          @relation(fields: [torneoId], references: [id])
+  torneo     Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
 
   @@map("notificaciones")
 }
