@@ -38,6 +38,7 @@
     "passport-jwt": "^4.0.1",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.12.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
@@ -85,14 +86,17 @@
       "**/*.(t|j)s"
     ],
     "reporters": [
-  "default",
-  ["jest-html-reporter", {
-    "pageTitle": "Tourney FC - Reporte de Pruebas",
-    "outputPath": "test-report/index.html",
-    "includeFailureMsg": true,
-    "includeConsoleLog": true
-  }]
-],
+      "default",
+      [
+        "jest-html-reporter",
+        {
+          "pageTitle": "Tourney FC - Reporte de Pruebas",
+          "outputPath": "test-report/index.html",
+          "includeFailureMsg": true,
+          "includeConsoleLog": true
+        }
+      ]
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

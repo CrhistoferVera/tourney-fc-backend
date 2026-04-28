@@ -302,4 +302,13 @@ model Notificacion {
   @@map("notificaciones")
 }
 
+model ResetPassword {
+  id        String   @id @default(uuid())
+  email     String
+  codigo    String
+  expiresAt DateTime
+  usado     Boolean  @default(false)
+  createdAt DateTime @default(now())
 
+  @@map("reset_password")
+}
