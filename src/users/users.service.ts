@@ -91,14 +91,24 @@ export class UsersService {
     },
   });
 
-  const torneos = participaciones.map((p) => ({
+  const torneos = participaciones
+  .map((p) => ({
     id: p.torneo.id,
     nombre: p.torneo.nombre,
     formato: p.torneo.formato,
     estado: p.torneo.estado,
     cantidadEquipos: p.torneo.equipos.length,
     rol: p.rol,
-  }));
+  }))
+  .sort((a, b) => {
+    const orden: Record<string, number> = {
+      EN_CURSO: 0,
+      EN_INSCRIPCION: 1,
+      BORRADOR: 2,
+      FINALIZADO: 3,
+    };
+    return (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4);
+  });
 
   // Próximo partido del usuario
   const equiposDelUsuario = await this.prisma.usuarioEquipo.findMany({

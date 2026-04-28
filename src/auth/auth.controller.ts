@@ -3,6 +3,9 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { VerifyCodeDto } from './dto/verify-code.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RegisterResponse, LoginResponse } from './entities/auth.entity';
 
 @ApiTags('Auth')
@@ -30,5 +33,35 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Correo electrónico o contraseña incorrectos' })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Solicitar código de recuperación', description: 'Envía un código de 6 dígitos al correo registrado, válido por 5 minutos' })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({ status: 200, description: 'Código enviado si el correo está registrado' })
+  @ApiResponse({ status: 400, description: 'Formato de correo inválido' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('verify-code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar código', description: 'Verifica que el código de 6 dígitos sea válido y no haya expirado' })
+  @ApiBody({ type: VerifyCodeDto })
+  @ApiResponse({ status: 200, description: 'Código válido' })
+  @ApiResponse({ status: 400, description: 'Código inválido o expirado' })
+  async verifyCode(@Body() dto: VerifyCodeDto) {
+    return this.authService.verifyCode(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restablecer contraseña', description: 'Cambia la contraseña usando el código de verificación' })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({ status: 200, description: 'Contraseña restablecida exitosamente' })
+  @ApiResponse({ status: 400, description: 'Código inválido, expirado o contraseña débil' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 }
