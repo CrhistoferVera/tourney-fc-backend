@@ -116,6 +116,7 @@ model Torneo {
   partidos        Partido[]
   notificaciones  Notificacion[]
   enlacesInvitacion EnlaceInvitacion[]
+  staffPendiente StaffPendiente[]
 
   @@map("torneos")
 }
@@ -311,4 +312,16 @@ model ResetPassword {
   createdAt DateTime @default(now())
 
   @@map("reset_password")
+}
+
+model StaffPendiente {
+  id        String   @id @default(uuid())
+  torneoId  String
+  email     String
+  createdAt DateTime @default(now())
+
+  torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+
+  @@unique([torneoId, email])
+  @@map("staff_pendiente")
 }

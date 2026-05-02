@@ -1,15 +1,23 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger,  } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { EstadoTorneo, RolTorneo } from '@prisma/client';
+import { Resend } from 'resend';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class TournamentsService {
   private readonly logger = new Logger(TournamentsService.name);
+  private readonly resend: Resend;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {
+    this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
+  }
 
   async create(userId: string, dto: CreateTournamentDto) {
     const torneo = await this.prisma.torneo.create({
@@ -40,6 +48,25 @@ export class TournamentsService {
 
     this.logger.log(`Torneo creado: ${torneo.id} por usuario: ${userId}`);
     return torneo;
+  }
+
+  async addStaffPendiente(torneoId: string, userId: string, email: string) {
+    await this.checkOrganizador(torneoId, userId);
+
+    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+
+    if (torneo.estado !== EstadoTorneo.BORRADOR && torneo.estado !== EstadoTorneo.EN_INSCRIPCION) {
+      throw new BadRequestException('Solo se puede agregar staff a torneos en borrador o inscripción');
+    }
+
+    await this.prisma.staffPendiente.upsert({
+      where: { torneoId_email: { torneoId, email } },
+      update: {},
+      create: { torneoId, email },
+    });
+
+    return { mensaje: 'Staff guardado correctamente' };
   }
 
   async findAll(query: QueryTournamentDto) {
@@ -191,7 +218,10 @@ export class TournamentsService {
   }
 
   async publish(id: string, userId: string) {
-    const torneo = await this.prisma.torneo.findUnique({ where: { id } });
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id },
+      include: { staffPendiente: true },
+    });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
     await this.checkOrganizador(id, userId);
@@ -204,6 +234,45 @@ export class TournamentsService {
       where: { id },
       data: { estado: EstadoTorneo.EN_INSCRIPCION },
     });
+
+    // Procesar staff pendiente
+    for (const staff of torneo.staffPendiente) {
+      const usuario = await this.prisma.usuario.findUnique({
+        where: { email: staff.email },
+      });
+
+      if (usuario) {
+        // Asignar rol STAFF
+        await this.prisma.usuarioTorneo.upsert({
+          where: { usuarioId_torneoId: { usuarioId: usuario.id, torneoId: id } },
+          update: { rol: RolTorneo.STAFF },
+          create: { usuarioId: usuario.id, torneoId: id, rol: RolTorneo.STAFF },
+        });
+
+        // Enviar correo
+        await this.resend.emails.send({
+          from: this.configService.get<string>('RESEND_FROM')!,
+          to: staff.email,
+          subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
+          html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+            <h2 style="color: #0D7A3E;">TourneyFC</h2>
+            <p>Hola <strong>${usuario.nombre}</strong>,</p>
+            <p>Has sido asignado como <strong>Staff</strong> en el siguiente torneo:</p>
+            <div style="background: #EBF0EC; padding: 16px; border-radius: 8px; margin: 16px 0;">
+              <p style="margin: 0; font-size: 18px; font-weight: bold; color: #0F1A14;">${torneo.nombre}</p>
+            </div>
+            <p style="color: #3D4F44; font-size: 14px;">Ingresa a TourneyFC para ver los detalles del torneo.</p>
+          </div>
+        `,
+        });
+
+        this.logger.log(`Correo de staff enviado a: ${staff.email} para torneo: ${id}`);
+      }
+
+      // Eliminar de pendientes
+      await this.prisma.staffPendiente.delete({ where: { id: staff.id } });
+    }
 
     this.logger.log(`Torneo publicado: ${id}`);
     return updated;
