@@ -62,7 +62,9 @@ describe('AuthService', () => {
     it('HU-1 criterio 5: email duplicado lanza ConflictException', async () => {
       mockPrismaService.usuario.findUnique.mockResolvedValue({ id: 'uuid-1' });
 
-      await expect(service.register(registerDto)).rejects.toThrow(ConflictException);
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('HU-1 criterio 5: mensaje de error correcto para email duplicado', async () => {
@@ -122,14 +124,17 @@ describe('AuthService', () => {
     it('HU-2 criterio 3: email no registrado lanza UnauthorizedException', async () => {
       mockPrismaService.usuario.findUnique.mockResolvedValue(null);
 
-      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('HU-2 criterio 3: contraseña incorrecta lanza UnauthorizedException', async () => {
       mockPrismaService.usuario.findUnique.mockResolvedValue(mockUser);
 
-      await expect(service.login({ ...loginDto, password: 'WrongPass1' }))
-        .rejects.toThrow(UnauthorizedException);
+      await expect(
+        service.login({ ...loginDto, password: 'WrongPass1' }),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('HU-2 criterio 3: mensaje de error correcto para credenciales inválidas', async () => {

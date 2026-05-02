@@ -1,4 +1,10 @@
-import { Injectable, ConflictException, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
@@ -31,7 +37,9 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Este correo electrónico ya está registrado. Por favor, inicie sesión');
+      throw new ConflictException(
+        'Este correo electrónico ya está registrado. Por favor, inicie sesión',
+      );
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -67,13 +75,20 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Correo electrónico o contraseña incorrectos. Por favor, intente nuevamente');
+      throw new UnauthorizedException(
+        'Correo electrónico o contraseña incorrectos. Por favor, intente nuevamente',
+      );
     }
 
-    const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user.passwordHash,
+    );
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Correo electrónico o contraseña incorrectos. Por favor, intente nuevamente');
+      throw new UnauthorizedException(
+        'Correo electrónico o contraseña incorrectos. Por favor, intente nuevamente',
+      );
     }
 
     const token = this.jwtService.sign({ sub: user.id, email: user.email });
@@ -98,7 +113,10 @@ export class AuthService {
 
     // Por seguridad siempre respondemos lo mismo aunque no exista el usuario
     if (!user) {
-      return { mensaje: 'Si el correo está registrado, recibirás un código de verificación' };
+      return {
+        mensaje:
+          'Si el correo está registrado, recibirás un código de verificación',
+      };
     }
 
     // Invalidar códigos anteriores del mismo email
@@ -135,7 +153,10 @@ export class AuthService {
     });
 
     this.logger.log(`Código de recuperación enviado a: ${dto.email}`);
-    return { mensaje: 'Si el correo está registrado, recibirás un código de verificación' };
+    return {
+      mensaje:
+        'Si el correo está registrado, recibirás un código de verificación',
+    };
   }
 
   async verifyCode(dto: VerifyCodeDto) {

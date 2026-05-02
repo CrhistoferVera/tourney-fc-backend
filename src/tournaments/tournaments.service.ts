@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger,  } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -31,7 +37,12 @@ export class TournamentsService {
         zona: dto.zona,
         estado: EstadoTorneo.BORRADOR,
         campos: dto.campos
-          ? { create: dto.campos.map((c) => ({ nombre: c.nombre, direccion: c.direccion })) }
+          ? {
+              create: dto.campos.map((c) => ({
+                nombre: c.nombre,
+                direccion: c.direccion,
+              })),
+            }
           : undefined,
         participantes: {
           create: {
@@ -53,11 +64,18 @@ export class TournamentsService {
   async addStaffPendiente(torneoId: string, userId: string, email: string) {
     await this.checkOrganizador(torneoId, userId);
 
-    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: torneoId },
+    });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
-    if (torneo.estado !== EstadoTorneo.BORRADOR && torneo.estado !== EstadoTorneo.EN_INSCRIPCION) {
-      throw new BadRequestException('Solo se puede agregar staff a torneos en borrador o inscripción');
+    if (
+      torneo.estado !== EstadoTorneo.BORRADOR &&
+      torneo.estado !== EstadoTorneo.EN_INSCRIPCION
+    ) {
+      throw new BadRequestException(
+        'Solo se puede agregar staff a torneos en borrador o inscripción',
+      );
     }
 
     await this.prisma.staffPendiente.upsert({
@@ -156,7 +174,9 @@ export class TournamentsService {
           include: {
             jugadores: {
               include: {
-                usuario: { select: { id: true, nombre: true, fotoPerfil: true } },
+                usuario: {
+                  select: { id: true, nombre: true, fotoPerfil: true },
+                },
               },
             },
           },
@@ -167,7 +187,9 @@ export class TournamentsService {
 
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
-    const participacion = torneo.participantes.find((p) => p.usuarioId === userId);
+    const participacion = torneo.participantes.find(
+      (p) => p.usuarioId === userId,
+    );
     const rolUsuario = participacion?.rol ?? null;
 
     return {
@@ -195,8 +217,13 @@ export class TournamentsService {
 
     await this.checkOrganizador(id, userId);
 
-    if (torneo.estado === EstadoTorneo.EN_CURSO || torneo.estado === EstadoTorneo.FINALIZADO) {
-      throw new ForbiddenException('No se puede editar un torneo en curso o finalizado');
+    if (
+      torneo.estado === EstadoTorneo.EN_CURSO ||
+      torneo.estado === EstadoTorneo.FINALIZADO
+    ) {
+      throw new ForbiddenException(
+        'No se puede editar un torneo en curso o finalizado',
+      );
     }
 
     const updated = await this.prisma.torneo.update({
@@ -227,7 +254,9 @@ export class TournamentsService {
     await this.checkOrganizador(id, userId);
 
     if (torneo.estado !== EstadoTorneo.BORRADOR) {
-      throw new BadRequestException('Solo se puede publicar un torneo en estado BORRADOR');
+      throw new BadRequestException(
+        'Solo se puede publicar un torneo en estado BORRADOR',
+      );
     }
 
     const updated = await this.prisma.torneo.update({
@@ -244,7 +273,9 @@ export class TournamentsService {
       if (usuario) {
         // Asignar rol STAFF
         await this.prisma.usuarioTorneo.upsert({
-          where: { usuarioId_torneoId: { usuarioId: usuario.id, torneoId: id } },
+          where: {
+            usuarioId_torneoId: { usuarioId: usuario.id, torneoId: id },
+          },
           update: { rol: RolTorneo.STAFF },
           create: { usuarioId: usuario.id, torneoId: id, rol: RolTorneo.STAFF },
         });
@@ -267,7 +298,9 @@ export class TournamentsService {
         `,
         });
 
-        this.logger.log(`Correo de staff enviado a: ${staff.email} para torneo: ${id}`);
+        this.logger.log(
+          `Correo de staff enviado a: ${staff.email} para torneo: ${id}`,
+        );
       }
 
       // Eliminar de pendientes
@@ -300,7 +333,9 @@ export class TournamentsService {
     });
 
     if (!participacion || participacion.rol !== RolTorneo.ORGANIZADOR) {
-      throw new ForbiddenException('Solo el organizador puede realizar esta acción');
+      throw new ForbiddenException(
+        'Solo el organizador puede realizar esta acción',
+      );
     }
   }
 }
