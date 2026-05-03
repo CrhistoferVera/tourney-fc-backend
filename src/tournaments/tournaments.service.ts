@@ -279,7 +279,8 @@ export class TournamentsService {
           update: { rol: RolTorneo.STAFF },
           create: { usuarioId: usuario.id, torneoId: id, rol: RolTorneo.STAFF },
         });
-
+          
+        try{
         // Enviar correo
         await this.resend.emails.send({
           from: this.configService.get<string>('RESEND_FROM')!,
@@ -301,6 +302,10 @@ export class TournamentsService {
         this.logger.log(
           `Correo de staff enviado a: ${staff.email} para torneo: ${id}`,
         );
+      }catch(error: any) {
+  this.logger.error(`Error al enviar correo a ${staff.email}: ${error.message}`);
+  // No interrumpas el flujo, solo registra
+}
       }
 
       // Eliminar de pendientes
