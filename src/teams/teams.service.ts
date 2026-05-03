@@ -154,7 +154,7 @@ export class TeamsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos = [RolTorneo.CAPITAN, RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [RolTorneo.CAPITAN, RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
       throw new ForbiddenException('No tienes permisos para realizar esta acción');
     }
@@ -164,7 +164,7 @@ export class TeamsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
       throw new ForbiddenException('Solo el organizador o staff puede realizar esta acción');
     }

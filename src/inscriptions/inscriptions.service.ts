@@ -112,7 +112,7 @@ export class InscriptionsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
       throw new ForbiddenException('Solo el organizador o staff puede gestionar inscripciones');
     }
