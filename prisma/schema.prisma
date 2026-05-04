@@ -165,6 +165,7 @@ model Equipo {
   torneoId  String
   nombre    String
   escudo    String?
+  telefonoCapitan String?
   createdAt DateTime @default(now())
 
   torneo        Torneo          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
