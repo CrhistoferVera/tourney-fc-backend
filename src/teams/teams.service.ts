@@ -21,6 +21,7 @@ export class TeamsService {
         nombre: dto.nombre,
         escudo: dto.escudo,
         telefonoCapitan: dto.telefonoCapitan,
+        cantidadJugadores: dto.cantidadJugadores,
       },
     });
 
