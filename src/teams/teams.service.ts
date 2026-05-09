@@ -65,11 +65,20 @@ export class TeamsService {
       data: { usuarioId: userId, equipoId: equipo.id },
     });
 
-    await this.prisma.usuarioTorneo.upsert({
-      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-      update: { rol: RolTorneo.CAPITAN },
-      create: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
-    });
+    const participacionExistente = await this.prisma.usuarioTorneo.findUnique({
+  where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
+});
+
+if (!participacionExistente) {
+  await this.prisma.usuarioTorneo.create({
+    data: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
+  });
+} else if (participacionExistente.rol !== RolTorneo.ORGANIZADOR && participacionExistente.rol !== RolTorneo.STAFF) {
+  await this.prisma.usuarioTorneo.update({
+    where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
+    data: { rol: RolTorneo.CAPITAN },
+  });
+}
 
     this.logger.log(
       `Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`,

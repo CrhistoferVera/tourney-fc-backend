@@ -140,6 +140,23 @@ export class MatchesService {
     return updated;
   }
 
+  async confirmAll(torneoId: string, userId: string) {
+  await this.checkOrganizadorOStaff(torneoId, userId);
+
+  await this.prisma.partido.updateMany({
+    where: { torneoId, estado: EstadoPartido.PENDIENTE },
+    data: { estado: EstadoPartido.CONFIRMADO },
+  });
+
+  await this.prisma.torneo.update({
+    where: { id: torneoId },
+    data: { estado: 'EN_CURSO' },
+  });
+
+  this.logger.log(`Todos los partidos del torneo ${torneoId} confirmados`);
+  return { mensaje: 'Todos los partidos confirmados y torneo iniciado' };
+}
+
   private async getRol(torneoId: string, userId: string): Promise<RolTorneo> {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },

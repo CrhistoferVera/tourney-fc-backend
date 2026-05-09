@@ -69,15 +69,14 @@ export class MatchesController {
   }
 
   @Post(':id/confirm')
-  @ApiOperation({
-    summary: 'Confirmar partido',
-    description: 'Cambia estado a CONFIRMADO — solo ORGANIZADOR o STAFF',
-  })
-  @ApiParam({ name: 'id', description: 'UUID del partido' })
-  @ApiResponse({ status: 201, description: 'Partido confirmado' })
-  @ApiResponse({ status: 400, description: 'Ya estaba confirmado' })
-  @ApiResponse({ status: 403, description: 'Sin permisos' })
-  confirm(@Param('id') id: string, @Request() req: any) {
-    return this.matchesService.confirm(id, req.user.id);
-  }
+@ApiOperation({ summary: 'Confirmar partido' })
+confirmOne(@Param('id') id: string, @Request() req: any) {
+  return this.matchesService.confirm(id, req.user.id);
+}
+
+@Post('tournament/:torneoId/confirm-all')
+@ApiOperation({ summary: 'Confirmar todos los partidos y poner torneo EN_CURSO' })
+confirmAll(@Param('torneoId') torneoId: string, @Request() req: any) {
+  return this.matchesService.confirmAll(torneoId, req.user.id);
+}
 }
