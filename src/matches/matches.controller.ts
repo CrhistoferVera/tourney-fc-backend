@@ -69,14 +69,16 @@ export class MatchesController {
   }
 
   @Post(':id/confirm')
-@ApiOperation({ summary: 'Confirmar partido' })
-confirmOne(@Param('id') id: string, @Request() req: any) {
-  return this.matchesService.confirm(id, req.user.id);
-}
+  @ApiOperation({ summary: 'Confirmar partido' })
+  confirmOne(@Param('id') id: string, @Request() req: any) {
+    return this.matchesService.confirm(id, req.user.id);
+  }
 
-@Post('tournament/:torneoId/confirm-all')
-@ApiOperation({ summary: 'Confirmar todos los partidos y poner torneo EN_CURSO' })
-confirmAll(@Param('torneoId') torneoId: string, @Request() req: any) {
-  return this.matchesService.confirmAll(torneoId, req.user.id);
-}
+  @Post('tournament/:torneoId/confirm-all')
+  @ApiOperation({
+    summary: 'Confirmar todos los partidos y poner torneo EN_CURSO',
+  })
+  confirmAll(@Param('torneoId') torneoId: string, @Request() req: any) {
+    return this.matchesService.confirmAll(torneoId, req.user.id);
+  }
 }

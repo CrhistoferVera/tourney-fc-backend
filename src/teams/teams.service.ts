@@ -66,19 +66,22 @@ export class TeamsService {
     });
 
     const participacionExistente = await this.prisma.usuarioTorneo.findUnique({
-  where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-});
+      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
+    });
 
-if (!participacionExistente) {
-  await this.prisma.usuarioTorneo.create({
-    data: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
-  });
-} else if (participacionExistente.rol !== RolTorneo.ORGANIZADOR && participacionExistente.rol !== RolTorneo.STAFF) {
-  await this.prisma.usuarioTorneo.update({
-    where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-    data: { rol: RolTorneo.CAPITAN },
-  });
-}
+    if (!participacionExistente) {
+      await this.prisma.usuarioTorneo.create({
+        data: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
+      });
+    } else if (
+      participacionExistente.rol !== RolTorneo.ORGANIZADOR &&
+      participacionExistente.rol !== RolTorneo.STAFF
+    ) {
+      await this.prisma.usuarioTorneo.update({
+        where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
+        data: { rol: RolTorneo.CAPITAN },
+      });
+    }
 
     this.logger.log(
       `Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`,
@@ -149,7 +152,7 @@ if (!participacionExistente) {
       nombre: e.nombre,
       escudo: e.escudo,
       telefonoCapitan: e.telefonoCapitan,
-      cantidadJugadores: e._count.jugadores,
+      cantidadJugadores: e.cantidadJugadores ?? e._count.jugadores,
       jugadores: e.jugadores.map((j) => ({
         id: j.usuario.id,
         nombre: j.usuario.nombre,
