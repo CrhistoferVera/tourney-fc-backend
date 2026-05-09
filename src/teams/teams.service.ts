@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
@@ -10,10 +16,40 @@ export class TeamsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  // Crear equipo dentro de un torneo — el creador se vuelve CAPITAN
   async create(torneoId: string, userId: string, dto: CreateTeamDto) {
-    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: torneoId },
+    });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
+
+    if (torneo.estado !== 'EN_INSCRIPCION') {
+      throw new BadRequestException(
+        'Solo se pueden inscribir equipos cuando el torneo está en período de inscripción',
+      );
+    }
+
+    // Verificar si el usuario ya tiene equipo en este torneo
+    const equipoExistente = await this.prisma.equipo.findFirst({
+      where: {
+        torneoId,
+        jugadores: { some: { usuarioId: userId } },
+      },
+    });
+    if (equipoExistente) {
+      throw new BadRequestException(
+        'Ya tienes un equipo inscrito en este torneo',
+      );
+    }
+
+    // Verificar cupo
+    const totalEquipos = await this.prisma.equipo.count({
+      where: { torneoId },
+    });
+    if (totalEquipos >= torneo.maxEquipos) {
+      throw new BadRequestException(
+        'El torneo ya alcanzó el cupo máximo de equipos',
+      );
+    }
 
     const equipo = await this.prisma.equipo.create({
       data: {
@@ -25,20 +61,61 @@ export class TeamsService {
       },
     });
 
-    // Agregar al usuario como jugador del equipo
     await this.prisma.usuarioEquipo.create({
       data: { usuarioId: userId, equipoId: equipo.id },
     });
 
-    // Asignar rol CAPITAN en el torneo
     await this.prisma.usuarioTorneo.upsert({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
       update: { rol: RolTorneo.CAPITAN },
       create: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
     });
 
-    this.logger.log(`Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`);
+    this.logger.log(
+      `Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`,
+    );
     return equipo;
+  }
+
+  async remove(equipoId: string, userId: string) {
+    const equipo = await this.prisma.equipo.findUnique({
+      where: { id: equipoId },
+      include: { jugadores: true },
+    });
+    if (!equipo) throw new NotFoundException('Equipo no encontrado');
+
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: equipo.torneoId },
+    });
+    if (torneo?.estado === 'EN_CURSO' || torneo?.estado === 'FINALIZADO') {
+      throw new ForbiddenException(
+        'No se pueden eliminar equipos cuando el torneo está en curso o finalizado',
+      );
+    }
+
+    const participacion = await this.prisma.usuarioTorneo.findUnique({
+      where: {
+        usuarioId_torneoId: { usuarioId: userId, torneoId: equipo.torneoId },
+      },
+    });
+
+    const esCapitanDelEquipo =
+      participacion?.rol === RolTorneo.CAPITAN &&
+      equipo.jugadores.some((j) => j.usuarioId === userId);
+
+    const esOrganizadorOStaff =
+      participacion?.rol === RolTorneo.ORGANIZADOR ||
+      participacion?.rol === RolTorneo.STAFF;
+
+    if (!esCapitanDelEquipo && !esOrganizadorOStaff) {
+      throw new ForbiddenException(
+        'No tienes permisos para eliminar este equipo',
+      );
+    }
+
+    await this.prisma.equipo.delete({ where: { id: equipoId } });
+    this.logger.log(`Equipo eliminado: ${equipoId}`);
+    return { mensaje: 'Equipo eliminado exitosamente' };
   }
 
   // Listar equipos de un torneo
@@ -95,7 +172,9 @@ export class TeamsService {
 
   // Editar equipo — solo CAPITAN u ORGANIZADOR/STAFF
   async update(equipoId: string, userId: string, dto: UpdateTeamDto) {
-    const equipo = await this.prisma.equipo.findUnique({ where: { id: equipoId } });
+    const equipo = await this.prisma.equipo.findUnique({
+      where: { id: equipoId },
+    });
     if (!equipo) throw new NotFoundException('Equipo no encontrado');
 
     await this.checkCapitanOSuperior(equipo.torneoId, userId);
@@ -109,19 +188,6 @@ export class TeamsService {
     return updated;
   }
 
-  // Eliminar equipo — solo ORGANIZADOR o STAFF
-  async remove(equipoId: string, userId: string) {
-    const equipo = await this.prisma.equipo.findUnique({ where: { id: equipoId } });
-    if (!equipo) throw new NotFoundException('Equipo no encontrado');
-
-    await this.checkOrganizadorOStaff(equipo.torneoId, userId);
-
-    await this.prisma.equipo.delete({ where: { id: equipoId } });
-    this.logger.log(`Equipo eliminado: ${equipoId}`);
-
-    return { mensaje: 'Equipo eliminado exitosamente' };
-  }
-
   // Agregar jugador al equipo mediante enlace — HU-17
   async joinTeam(equipoId: string, userId: string) {
     const equipo = await this.prisma.equipo.findUnique({
@@ -133,7 +199,8 @@ export class TeamsService {
     const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
       where: { usuarioId_equipoId: { usuarioId: userId, equipoId } },
     });
-    if (yaEsMiembro) throw new ForbiddenException('Ya eres miembro de este equipo');
+    if (yaEsMiembro)
+      throw new ForbiddenException('Ya eres miembro de este equipo');
 
     await this.prisma.usuarioEquipo.create({
       data: { usuarioId: userId, equipoId },
@@ -141,9 +208,15 @@ export class TeamsService {
 
     // Asignar rol JUGADOR en el torneo si no tiene rol
     await this.prisma.usuarioTorneo.upsert({
-      where: { usuarioId_torneoId: { usuarioId: userId, torneoId: equipo.torneoId } },
+      where: {
+        usuarioId_torneoId: { usuarioId: userId, torneoId: equipo.torneoId },
+      },
       update: {},
-      create: { usuarioId: userId, torneoId: equipo.torneoId, rol: RolTorneo.JUGADOR },
+      create: {
+        usuarioId: userId,
+        torneoId: equipo.torneoId,
+        rol: RolTorneo.JUGADOR,
+      },
     });
 
     this.logger.log(`Usuario ${userId} se unió al equipo ${equipoId}`);
@@ -155,9 +228,15 @@ export class TeamsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos: RolTorneo[] = [RolTorneo.CAPITAN, RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [
+      RolTorneo.CAPITAN,
+      RolTorneo.ORGANIZADOR,
+      RolTorneo.STAFF,
+    ];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException('No tienes permisos para realizar esta acción');
+      throw new ForbiddenException(
+        'No tienes permisos para realizar esta acción',
+      );
     }
   }
 
@@ -165,9 +244,14 @@ export class TeamsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [
+      RolTorneo.ORGANIZADOR,
+      RolTorneo.STAFF,
+    ];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException('Solo el organizador o staff puede realizar esta acción');
+      throw new ForbiddenException(
+        'Solo el organizador o staff puede realizar esta acción',
+      );
     }
   }
 }

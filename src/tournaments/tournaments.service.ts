@@ -279,14 +279,14 @@ export class TournamentsService {
           update: { rol: RolTorneo.STAFF },
           create: { usuarioId: usuario.id, torneoId: id, rol: RolTorneo.STAFF },
         });
-          
-        try{
-        // Enviar correo
-        await this.resend.emails.send({
-          from: this.configService.get<string>('RESEND_FROM')!,
-          to: staff.email,
-          subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
-          html: `
+
+        try {
+          // Enviar correo
+          await this.resend.emails.send({
+            from: this.configService.get<string>('RESEND_FROM')!,
+            to: staff.email,
+            subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
+            html: `
           <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
             <h2 style="color: #0D7A3E;">TourneyFC</h2>
             <p>Hola <strong>${usuario.nombre}</strong>,</p>
@@ -297,15 +297,17 @@ export class TournamentsService {
             <p style="color: #3D4F44; font-size: 14px;">Ingresa a TourneyFC para ver los detalles del torneo.</p>
           </div>
         `,
-        });
+          });
 
-        this.logger.log(
-          `Correo de staff enviado a: ${staff.email} para torneo: ${id}`,
-        );
-      }catch(error: any) {
-  this.logger.error(`Error al enviar correo a ${staff.email}: ${error.message}`);
-  // No interrumpas el flujo, solo registra
-}
+          this.logger.log(
+            `Correo de staff enviado a: ${staff.email} para torneo: ${id}`,
+          );
+        } catch (error: any) {
+          this.logger.error(
+            `Error al enviar correo a ${staff.email}: ${error.message}`,
+          );
+          // No interrumpas el flujo, solo registra
+        }
       }
 
       // Eliminar de pendientes
@@ -313,6 +315,36 @@ export class TournamentsService {
     }
 
     this.logger.log(`Torneo publicado: ${id}`);
+    return updated;
+  }
+
+  async startTournament(id: string, userId: string) {
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id },
+      include: { _count: { select: { partidos: true } } },
+    });
+    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+
+    await this.checkOrganizador(id, userId);
+
+    if (torneo.estado !== EstadoTorneo.EN_INSCRIPCION) {
+      throw new BadRequestException(
+        'Solo se puede iniciar un torneo en estado EN_INSCRIPCION',
+      );
+    }
+
+    if (torneo._count.partidos === 0) {
+      throw new BadRequestException(
+        'Debes generar el fixture antes de iniciar el torneo',
+      );
+    }
+
+    const updated = await this.prisma.torneo.update({
+      where: { id },
+      data: { estado: EstadoTorneo.EN_CURSO },
+    });
+
+    this.logger.log(`Torneo iniciado: ${id}`);
     return updated;
   }
 

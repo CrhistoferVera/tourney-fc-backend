@@ -153,6 +153,30 @@ export class TournamentsController {
     return this.tournamentsService.publish(id, req.user.id);
   }
 
+  @Patch(':id/start')
+  @ApiOperation({
+    summary: 'Iniciar torneo',
+    description:
+      'Cambia el estado de EN_INSCRIPCION a EN_CURSO — solo ORGANIZADOR',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({
+    status: 200,
+    description: 'Torneo iniciado en estado EN_CURSO',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'El torneo no tiene fixture generado o no está en EN_INSCRIPCION',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Solo el organizador puede iniciar el torneo',
+  })
+  start(@Param('id') id: string, @Request() req: any) {
+    return this.tournamentsService.startTournament(id, req.user.id);
+  }
+
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar torneo',

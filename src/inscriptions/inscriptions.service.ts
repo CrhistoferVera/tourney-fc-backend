@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInscriptionDto } from './dto/create-inscription.dto';
 import { UpdateInscriptionDto } from './dto/update-inscription.dto';
@@ -12,14 +18,20 @@ export class InscriptionsService {
 
   // Solicitar inscripción — HU-13
   async create(torneoId: string, userId: string, dto: CreateInscriptionDto) {
-    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: torneoId },
+    });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
     if (torneo.estado !== EstadoTorneo.EN_INSCRIPCION) {
-      throw new BadRequestException('El torneo no está en período de inscripción');
+      throw new BadRequestException(
+        'El torneo no está en período de inscripción',
+      );
     }
 
-    const equipo = await this.prisma.equipo.findUnique({ where: { id: dto.equipoId } });
+    const equipo = await this.prisma.equipo.findUnique({
+      where: { id: dto.equipoId },
+    });
     if (!equipo) throw new NotFoundException('Equipo no encontrado');
 
     // Verificar que el usuario es capitán del equipo
@@ -27,25 +39,34 @@ export class InscriptionsService {
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
     if (!participacion || participacion.rol !== RolTorneo.CAPITAN) {
-      throw new ForbiddenException('Solo el capitán puede solicitar inscripción');
+      throw new ForbiddenException(
+        'Solo el capitán puede solicitar inscripción',
+      );
     }
 
     // Verificar si ya existe inscripción
     const existente = await this.prisma.inscripcion.findUnique({
       where: { equipoId: dto.equipoId },
     });
-    if (existente) throw new BadRequestException('Este equipo ya tiene una inscripción');
+    if (existente)
+      throw new BadRequestException('Este equipo ya tiene una inscripción');
 
     // Verificar cupo
     const inscripcionesAprobadas = await this.prisma.inscripcion.count({
       where: { torneoId, estado: EstadoInscripcion.APROBADA },
     });
     if (inscripcionesAprobadas >= torneo.maxEquipos) {
-      throw new BadRequestException('El torneo ya alcanzó el cupo máximo de equipos');
+      throw new BadRequestException(
+        'El torneo ya alcanzó el cupo máximo de equipos',
+      );
     }
 
     const inscripcion = await this.prisma.inscripcion.create({
-      data: { torneoId, equipoId: dto.equipoId, estado: EstadoInscripcion.PENDIENTE },
+      data: {
+        torneoId,
+        equipoId: dto.equipoId,
+        estado: EstadoInscripcion.PENDIENTE,
+      },
       include: { equipo: true, torneo: { select: { nombre: true } } },
     });
 
@@ -64,7 +85,9 @@ export class InscriptionsService {
           include: {
             jugadores: {
               include: {
-                usuario: { select: { id: true, nombre: true, fotoPerfil: true } },
+                usuario: {
+                  select: { id: true, nombre: true, fotoPerfil: true },
+                },
               },
             },
           },
@@ -75,7 +98,11 @@ export class InscriptionsService {
   }
 
   // Aprobar o rechazar inscripción — HU-14
-  async updateStatus(inscripcionId: string, userId: string, dto: UpdateInscriptionDto) {
+  async updateStatus(
+    inscripcionId: string,
+    userId: string,
+    dto: UpdateInscriptionDto,
+  ) {
     const inscripcion = await this.prisma.inscripcion.findUnique({
       where: { id: inscripcionId },
       include: { torneo: true },
@@ -84,14 +111,20 @@ export class InscriptionsService {
 
     await this.checkOrganizadorOStaff(inscripcion.torneoId, userId);
 
-    if (inscripcion.estado === EstadoInscripcion.APROBADA && dto.estado === EstadoInscripcion.APROBADA) {
+    if (
+      inscripcion.estado === EstadoInscripcion.APROBADA &&
+      dto.estado === EstadoInscripcion.APROBADA
+    ) {
       throw new BadRequestException('La inscripción ya está aprobada');
     }
 
     // Verificar cupo si se está aprobando
     if (dto.estado === EstadoInscripcion.APROBADA) {
       const aprobadas = await this.prisma.inscripcion.count({
-        where: { torneoId: inscripcion.torneoId, estado: EstadoInscripcion.APROBADA },
+        where: {
+          torneoId: inscripcion.torneoId,
+          estado: EstadoInscripcion.APROBADA,
+        },
       });
       if (aprobadas >= inscripcion.torneo.maxEquipos) {
         throw new BadRequestException('El torneo ya alcanzó el cupo máximo');
@@ -104,7 +137,9 @@ export class InscriptionsService {
       include: { equipo: true },
     });
 
-    this.logger.log(`Inscripción ${inscripcionId} actualizada a: ${dto.estado}`);
+    this.logger.log(
+      `Inscripción ${inscripcionId} actualizada a: ${dto.estado}`,
+    );
     return updated;
   }
 
@@ -112,9 +147,14 @@ export class InscriptionsService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [
+      RolTorneo.ORGANIZADOR,
+      RolTorneo.STAFF,
+    ];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException('Solo el organizador o staff puede gestionar inscripciones');
+      throw new ForbiddenException(
+        'Solo el organizador o staff puede gestionar inscripciones',
+      );
     }
   }
 }
