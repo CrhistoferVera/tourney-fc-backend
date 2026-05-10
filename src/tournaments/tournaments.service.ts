@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
-import { EstadoTorneo, RolTorneo } from '@prisma/client';
+import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion } from '@prisma/client';
 import { Resend } from 'resend';
 import { ConfigService } from '@nestjs/config';
 
@@ -64,9 +64,7 @@ export class TournamentsService {
   async addStaffPendiente(torneoId: string, userId: string, email: string) {
     await this.checkOrganizador(torneoId, userId);
 
-    const torneo = await this.prisma.torneo.findUnique({
-      where: { id: torneoId },
-    });
+    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
     if (
@@ -78,12 +76,20 @@ export class TournamentsService {
       );
     }
 
-    const user = await this.prisma.usuario.findUnique({ where: { email } });
-    if (!user) throw new NotFoundException('No se encontró un usuario con ese correo');
-    await this.prisma.staffPendiente.upsert({
-      where: { torneoId_email: { torneoId, email } },
+    const invitado = await this.prisma.usuario.findUnique({ where: { email } });
+    if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
+
+    await this.prisma.invitacionPendiente.upsert({
+      where: { torneoId_email_tipo: { torneoId, email, tipo: TipoInvitacion.STAFF } },
       update: {},
-      create: { torneoId, email },
+      create: {
+        torneoId,
+        email,
+        tipo: TipoInvitacion.STAFF,
+        estado: EstadoInvitacion.PENDIENTE,
+        invitadoPor: userId,
+        usuarioId: invitado.id,
+      },
     });
 
     return { mensaje: 'Staff guardado correctamente' };
@@ -93,23 +99,24 @@ export class TournamentsService {
     await this.checkOrganizador(torneoId, userId);
     const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
-    const pendientes = await this.prisma.staffPendiente.findMany({
-      where: { torneoId },
+
+    const invitaciones = await this.prisma.invitacionPendiente.findMany({
+      where: { torneoId, tipo: TipoInvitacion.STAFF, estado: EstadoInvitacion.PENDIENTE },
       orderBy: { createdAt: 'asc' },
     });
+
     const aceptados = await this.prisma.usuarioTorneo.findMany({
       where: { torneoId, rol: RolTorneo.STAFF },
       include: {
-        usuario: {
-          select: { id: true, nombre: true, email: true, fotoPerfil: true },
-        },
+        usuario: { select: { id: true, nombre: true, email: true, fotoPerfil: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
+
     return {
-      pendientes: pendientes.map((s) => ({
-        id: s.id,
-        email: s.email,
+      pendientes: invitaciones.map((i) => ({
+        id: i.id,
+        email: i.email,
         estado: 'PENDIENTE' as const,
       })),
       aceptados: aceptados.map((s) => ({
@@ -282,7 +289,12 @@ export class TournamentsService {
   async publish(id: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id },
-      include: { staffPendiente: true },
+      include: {
+        invitaciones: {
+          where: { tipo: TipoInvitacion.STAFF, estado: EstadoInvitacion.PENDIENTE },
+          include: { usuario: true },
+        },
+      },
     });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
@@ -299,26 +311,25 @@ export class TournamentsService {
       data: { estado: EstadoTorneo.EN_INSCRIPCION },
     });
 
-    for (const staff of torneo.staffPendiente) {
-      const usuario = await this.prisma.usuario.findUnique({
-        where: { email: staff.email },
-      });
+    for (const invitacion of torneo.invitaciones) {
+      const usuario = invitacion.usuario;
 
       if (usuario) {
-        // Asignar rol STAFF
         await this.prisma.usuarioTorneo.upsert({
-          where: {
-            usuarioId_torneoId: { usuarioId: usuario.id, torneoId: id },
-          },
+          where: { usuarioId_torneoId: { usuarioId: usuario.id, torneoId: id } },
           update: { rol: RolTorneo.STAFF },
           create: { usuarioId: usuario.id, torneoId: id, rol: RolTorneo.STAFF },
         });
 
+        await this.prisma.invitacionPendiente.update({
+          where: { id: invitacion.id },
+          data: { estado: EstadoInvitacion.ACEPTADA },
+        });
+
         try {
-          // Enviar correo
           await this.resend.emails.send({
             from: this.configService.get<string>('RESEND_FROM')!,
-            to: staff.email,
+            to: invitacion.email,
             subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
             html: `
           <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
@@ -332,18 +343,11 @@ export class TournamentsService {
           </div>
         `,
           });
-
-          this.logger.log(
-            `Correo de staff enviado a: ${staff.email} para torneo: ${id}`,
-          );
+          this.logger.log(`Correo de staff enviado a: ${invitacion.email} para torneo: ${id}`);
         } catch (error: any) {
-          this.logger.error(
-            `Error al enviar correo a ${staff.email}: ${error.message}`,
-          );
+          this.logger.error(`Error al enviar correo a ${invitacion.email}: ${error.message}`);
         }
       }
-
-      await this.prisma.staffPendiente.delete({ where: { id: staff.id } });
     }
 
     this.logger.log(`Torneo publicado: ${id}`);
