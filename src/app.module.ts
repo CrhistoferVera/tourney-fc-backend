@@ -10,6 +10,9 @@ import { TeamsModule } from './teams/teams.module';
 import { InscriptionsModule } from './inscriptions/inscriptions.module';
 import { FixturesModule } from './fixtures/fixtures.module';
 import { MatchesModule } from './matches/matches.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
+
+
 
 @Module({
   imports: [
@@ -22,6 +25,8 @@ import { MatchesModule } from './matches/matches.module';
     InscriptionsModule,
     FixturesModule,
     MatchesModule,
+    CloudinaryModule,
+
   ],
   controllers: [AppController],
   providers: [AppService],

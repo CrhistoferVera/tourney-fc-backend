@@ -7,7 +7,11 @@ import {
   Param,
   UseGuards,
   Request,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -57,6 +61,21 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Token inválido o expirado' })
   updateMe(@Request() req: any, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.updateMe(req.user.id, updateUserDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/photo')
+  @UseInterceptors(FileInterceptor('photo'))
+  @ApiOperation({ summary: 'Subir foto de perfil' })
+  @ApiResponse({ status: 200, description: 'Foto actualizada' })
+  @ApiResponse({ status: 400, description: 'Archivo inválido' })
+  @ApiResponse({ status: 401, description: 'Token inválido o expirado' })
+  uploadPhoto(
+    @Request() req: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No se recibió ninguna imagen');
+    return this.usersService.updatePhoto(req.user.id, file);
   }
 
   @UseGuards(JwtAuthGuard)
