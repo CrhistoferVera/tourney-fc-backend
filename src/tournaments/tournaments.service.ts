@@ -77,15 +77,49 @@ export class TournamentsService {
         'Solo se puede agregar staff a torneos en borrador o inscripción',
       );
     }
+
     const user = await this.prisma.usuario.findUnique({ where: { email } });
     if (!user) throw new NotFoundException('No se encontró un usuario con ese correo');
     await this.prisma.staffPendiente.upsert({
       where: { torneoId_email: { torneoId, email } },
       update: {},
-      create: { torneoId, email, userId: user.id },
+      create: { torneoId, email },
     });
 
     return { mensaje: 'Staff guardado correctamente' };
+  }
+
+  async getStaff(torneoId: string, userId: string) {
+    await this.checkOrganizador(torneoId, userId);
+    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+    const pendientes = await this.prisma.staffPendiente.findMany({
+      where: { torneoId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const aceptados = await this.prisma.usuarioTorneo.findMany({
+      where: { torneoId, rol: RolTorneo.STAFF },
+      include: {
+        usuario: {
+          select: { id: true, nombre: true, email: true, fotoPerfil: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return {
+      pendientes: pendientes.map((s) => ({
+        id: s.id,
+        email: s.email,
+        estado: 'PENDIENTE' as const,
+      })),
+      aceptados: aceptados.map((s) => ({
+        id: s.id,
+        nombre: s.usuario.nombre,
+        email: s.usuario.email,
+        fotoPerfil: s.usuario.fotoPerfil,
+        estado: 'ACEPTADO' as const,
+      })),
+    };
   }
 
   async findAll(query: QueryTournamentDto) {
@@ -265,7 +299,6 @@ export class TournamentsService {
       data: { estado: EstadoTorneo.EN_INSCRIPCION },
     });
 
-    // Procesar staff pendiente
     for (const staff of torneo.staffPendiente) {
       const usuario = await this.prisma.usuario.findUnique({
         where: { email: staff.email },
@@ -307,11 +340,9 @@ export class TournamentsService {
           this.logger.error(
             `Error al enviar correo a ${staff.email}: ${error.message}`,
           );
-          // No interrumpas el flujo, solo registra
         }
       }
 
-      // Eliminar de pendientes
       await this.prisma.staffPendiente.delete({ where: { id: staff.id } });
     }
 

@@ -218,4 +218,17 @@ export class TournamentsController {
       body.email,
     );
   }
+
+  @Get(':id/staff')
+  @ApiOperation({
+    summary: 'Listar staff del torneo',
+    description: 'Retorna los staff pendientes y los ya aceptados — solo ORGANIZADOR',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Staff pendientes y aceptados' })
+  @ApiResponse({ status: 403, description: 'Solo el organizador puede ver el staff' })
+  @ApiResponse({ status: 404, description: 'Torneo no encontrado' })
+  getStaff(@Param('id') id: string, @Request() req: any) {
+    return this.tournamentsService.getStaff(id, req.user.id);
+  }
 }
