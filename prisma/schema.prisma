@@ -190,7 +190,7 @@ model UsuarioEquipo {
   createdAt DateTime @default(now())
 
   usuario   Usuario  @relation(fields: [usuarioId], references: [id])
-  equipo    Equipo   @relation(fields: [equipoId], references: [id])
+  equipo    Equipo   @relation(fields: [equipoId], references: [id], onDelete: Cascade)
 
   @@unique([usuarioId, equipoId])
   @@map("usuario_equipo")
