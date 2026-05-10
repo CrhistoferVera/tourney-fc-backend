@@ -29,23 +29,26 @@ export class TeamsService {
     }
 
     // Verificar si el usuario ya tiene equipo en este torneo
-    const equipoExistente = await this.prisma.equipo.findFirst({
+    const inscripcionActiva = await this.prisma.inscripcion.findFirst({
       where: {
         torneoId,
-        jugadores: { some: { usuarioId: userId } },
+        estado: { in: ['PENDIENTE', 'APROBADA'] },
+        equipo: {
+          jugadores: { some: { usuarioId: userId } },
+        },
       },
     });
-    if (equipoExistente) {
+    if (inscripcionActiva) {
       throw new BadRequestException(
-        'Ya tienes un equipo inscrito en este torneo',
+        'Ya tienes una solicitud activa en este torneo',
       );
     }
 
     // Verificar cupo
-    const totalEquipos = await this.prisma.equipo.count({
-      where: { torneoId },
+    const totalAprobados = await this.prisma.inscripcion.count({
+      where: { torneoId, estado: 'APROBADA' },
     });
-    if (totalEquipos >= torneo.maxEquipos) {
+    if (totalAprobados >= torneo.maxEquipos) {
       throw new BadRequestException(
         'El torneo ya alcanzó el cupo máximo de equipos',
       );
@@ -132,7 +135,16 @@ export class TeamsService {
         'No tienes permisos para eliminar este equipo',
       );
     }
-
+    const jugadoresIds = equipo.jugadores.map((j) => j.usuarioId);
+    await this.prisma.usuarioTorneo.deleteMany({
+      where: {
+        torneoId: equipo.torneoId,
+        usuarioId: { in: jugadoresIds },
+        rol: RolTorneo.CAPITAN,
+      },
+    });
+    await this.prisma.usuarioEquipo.deleteMany({ where: { equipoId } });
+    await this.prisma.inscripcion.deleteMany({ where: { equipoId } });
     await this.prisma.equipo.delete({ where: { id: equipoId } });
     this.logger.log(`Equipo eliminado: ${equipoId}`);
     return { mensaje: 'Equipo eliminado exitosamente' };
