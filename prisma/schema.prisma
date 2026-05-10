@@ -87,6 +87,7 @@ model Usuario {
   eventosPartido  EventoPartido[]
   notificaciones  Notificacion[]
   enlacesInvitacion EnlaceInvitacion[]
+  staffPendiente  StaffPendiente[]
 
   @@map("usuarios")
 }
@@ -320,10 +321,12 @@ model StaffPendiente {
   id        String   @id @default(uuid())
   torneoId  String
   email     String
+  userId    String
   createdAt DateTime @default(now())
 
-  torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)
 
+  torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  usuario   Usuario  @relation(fields: [userId], references: [id])
   @@unique([torneoId, email])
   @@map("staff_pendiente")
 }

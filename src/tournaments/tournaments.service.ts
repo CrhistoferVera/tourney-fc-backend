@@ -77,11 +77,12 @@ export class TournamentsService {
         'Solo se puede agregar staff a torneos en borrador o inscripción',
       );
     }
-
+    const user = await this.prisma.usuario.findUnique({ where: { email } });
+    if (!user) throw new NotFoundException('No se encontró un usuario con ese correo');
     await this.prisma.staffPendiente.upsert({
       where: { torneoId_email: { torneoId, email } },
       update: {},
-      create: { torneoId, email },
+      create: { torneoId, email, userId: user.id },
     });
 
     return { mensaje: 'Staff guardado correctamente' };
