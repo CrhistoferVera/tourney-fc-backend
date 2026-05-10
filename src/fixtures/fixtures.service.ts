@@ -1,6 +1,9 @@
 import {
-  Injectable, NotFoundException, ForbiddenException,
-  BadRequestException, Logger,
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolTorneo, EstadoPartido, FormatoTorneo } from '@prisma/client';
@@ -11,40 +14,46 @@ export class FixturesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  // Generar fixture — HU-15
   async generate(torneoId: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id: torneoId },
-      include: {
-        equipos: true,
-        partidos: true,
-      },
+      include: { equipos: true, partidos: true },
     });
 
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
     await this.checkOrganizadorOStaff(torneoId, userId);
 
-    if (torneo.equipos.length < 2) {
-      throw new BadRequestException('Se necesitan al menos 2 equipos para generar el fixture');
+    if (torneo.estado !== 'EN_INSCRIPCION') {
+      throw new BadRequestException(
+        'Solo se puede generar el fixture cuando el torneo está en período de inscripción',
+      );
     }
 
-    // Eliminar partidos anteriores si existen
+    if (torneo.equipos.length < torneo.maxEquipos) {
+      throw new BadRequestException(
+        `Se necesitan ${torneo.maxEquipos} equipos para generar el fixture. Actualmente hay ${torneo.equipos.length}.`,
+      );
+    }
+
     if (torneo.partidos.length > 0) {
       await this.prisma.partido.deleteMany({ where: { torneoId } });
     }
 
     const equipos = torneo.equipos;
-    const partidos = torneo.formato === FormatoTorneo.LIGA
-      ? this.generarLiga(equipos)
-      : this.generarCopa(equipos);
+    const partidos =
+      torneo.formato === FormatoTorneo.LIGA
+        ? this.generarLiga(equipos)
+        : this.generarCopa(equipos);
 
-    // Distribuir fechas dentro del rango del torneo
     const fechaInicio = new Date(torneo.fechaInicio);
     const fechaFin = new Date(torneo.fechaFin);
-    const totalDias = Math.floor((fechaFin.getTime() - fechaInicio.getTime()) / (1000 * 60 * 60 * 24));
-    const intervaloDias = totalDias > 0 && partidos.length > 0
-      ? Math.floor(totalDias / partidos.length)
-      : 1;
+    const totalDias = Math.floor(
+      (fechaFin.getTime() - fechaInicio.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    const intervaloDias =
+      totalDias > 0 && partidos.length > 0
+        ? Math.floor(totalDias / partidos.length)
+        : 1;
 
     const partidosConFecha = partidos.map((p, i) => {
       const fecha = new Date(fechaInicio);
@@ -54,8 +63,9 @@ export class FixturesService {
 
     await this.prisma.partido.createMany({ data: partidosConFecha });
 
-    this.logger.log(`Fixture generado para torneo: ${torneoId} con ${partidosConFecha.length} partidos`);
-
+    this.logger.log(
+      `Fixture generado para torneo: ${torneoId} con ${partidosConFecha.length} partidos`,
+    );
     return this.findAll(torneoId);
   }
 
@@ -72,12 +82,15 @@ export class FixturesService {
     });
 
     // Agrupar por ronda
-    const porRonda = partidos.reduce((acc, p) => {
-      const ronda = p.ronda ?? 1;
-      if (!acc[ronda]) acc[ronda] = [];
-      acc[ronda].push(p);
-      return acc;
-    }, {} as Record<number, typeof partidos>);
+    const porRonda = partidos.reduce(
+      (acc, p) => {
+        const ronda = p.ronda ?? 1;
+        if (!acc[ronda]) acc[ronda] = [];
+        acc[ronda].push(p);
+        return acc;
+      },
+      {} as Record<number, typeof partidos>,
+    );
 
     return Object.entries(porRonda).map(([ronda, ps]) => ({
       ronda: Number(ronda),
@@ -104,7 +117,12 @@ export class FixturesService {
 
   // Algoritmo Liga — todos contra todos
   private generarLiga(equipos: { id: string }[]) {
-    const partidos: { equipoLocalId: string; equipoVisitanteId: string; ronda: number; fase: string }[] = [];
+    const partidos: {
+      equipoLocalId: string;
+      equipoVisitanteId: string;
+      ronda: number;
+      fase: string;
+    }[] = [];
     const n = equipos.length;
     const lista = [...equipos];
 
@@ -136,7 +154,12 @@ export class FixturesService {
 
   // Algoritmo Copa — eliminación directa
   private generarCopa(equipos: { id: string }[]) {
-    const partidos: { equipoLocalId: string; equipoVisitanteId: string; ronda: number; fase: string }[] = [];
+    const partidos: {
+      equipoLocalId: string;
+      equipoVisitanteId: string;
+      ronda: number;
+      fase: string;
+    }[] = [];
     const shuffled = [...equipos].sort(() => Math.random() - 0.5);
 
     // Rellenar con BYE si no es potencia de 2
@@ -179,9 +202,14 @@ export class FixturesService {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [
+      RolTorneo.ORGANIZADOR,
+      RolTorneo.STAFF,
+    ];
     if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException('Solo el organizador o staff puede generar el fixture');
+      throw new ForbiddenException(
+        'Solo el organizador o staff puede generar el fixture',
+      );
     }
   }
 }

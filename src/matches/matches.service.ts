@@ -1,6 +1,9 @@
 import {
-  Injectable, NotFoundException, ForbiddenException,
-  BadRequestException, Logger,
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateMatchDto } from './dto/update-match.dto';
@@ -20,7 +23,9 @@ export class MatchesService {
         equipoLocal: { select: { id: true, nombre: true, escudo: true } },
         equipoVisitante: { select: { id: true, nombre: true, escudo: true } },
         campo: { select: { id: true, nombre: true, direccion: true } },
-        torneo: { select: { id: true, nombre: true, fechaInicio: true, fechaFin: true } },
+        torneo: {
+          select: { id: true, nombre: true, fechaInicio: true, fechaFin: true },
+        },
       },
     });
 
@@ -40,13 +45,20 @@ export class MatchesService {
 
     // Si está CONFIRMADO, solo ORGANIZADOR o STAFF pueden cambiar estado a PENDIENTE
     if (partido.estado === EstadoPartido.CONFIRMADO) {
-      const rolesSuperiores: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+      const rolesSuperiores: RolTorneo[] = [
+        RolTorneo.ORGANIZADOR,
+        RolTorneo.STAFF,
+      ];
       if (!rolesSuperiores.includes(rol)) {
-        throw new ForbiddenException('Solo el organizador o staff puede modificar un partido confirmado');
+        throw new ForbiddenException(
+          'Solo el organizador o staff puede modificar un partido confirmado',
+        );
       }
       // Solo permite cambiar estado a PENDIENTE
       if (dto.estado && dto.estado !== EstadoPartido.PENDIENTE) {
-        throw new BadRequestException('Un partido confirmado solo puede volver a PENDIENTE');
+        throw new BadRequestException(
+          'Un partido confirmado solo puede volver a PENDIENTE',
+        );
       }
     }
 
@@ -57,7 +69,7 @@ export class MatchesService {
       const fechaFin = new Date(partido.torneo.fechaFin);
       if (fecha < fechaInicio || fecha > fechaFin) {
         throw new BadRequestException(
-          `La fecha debe estar entre ${fechaInicio.toLocaleDateString()} y ${fechaFin.toLocaleDateString()}`
+          `La fecha debe estar entre ${fechaInicio.toLocaleDateString()} y ${fechaFin.toLocaleDateString()}`,
         );
       }
     }
@@ -67,17 +79,25 @@ export class MatchesService {
       const campo = await this.prisma.campoJuego.findFirst({
         where: { id: dto.campoId, torneoId: partido.torneoId },
       });
-      if (!campo) throw new BadRequestException('La cancha no pertenece a este torneo');
+      if (!campo)
+        throw new BadRequestException('La cancha no pertenece a este torneo');
     }
 
     // CAPITAN solo puede editar si el partido está PENDIENTE
-    if (rol === RolTorneo.CAPITAN && partido.estado !== EstadoPartido.PENDIENTE) {
-      throw new ForbiddenException('El capitán solo puede editar partidos pendientes');
+    if (
+      rol === RolTorneo.CAPITAN &&
+      partido.estado !== EstadoPartido.PENDIENTE
+    ) {
+      throw new ForbiddenException(
+        'El capitán solo puede editar partidos pendientes',
+      );
     }
 
     // CAPITAN no puede cambiar estado
     if (rol === RolTorneo.CAPITAN && dto.estado) {
-      throw new ForbiddenException('El capitán no puede cambiar el estado del partido');
+      throw new ForbiddenException(
+        'El capitán no puede cambiar el estado del partido',
+      );
     }
 
     const updated = await this.prisma.partido.update({
@@ -100,7 +120,9 @@ export class MatchesService {
 
   // Confirmar partido — ORGANIZADOR o STAFF
   async confirm(partidoId: string, userId: string) {
-    const partido = await this.prisma.partido.findUnique({ where: { id: partidoId } });
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+    });
     if (!partido) throw new NotFoundException('Partido no encontrado');
 
     await this.checkOrganizadorOStaff(partido.torneoId, userId);
@@ -118,19 +140,42 @@ export class MatchesService {
     return updated;
   }
 
+  async confirmAll(torneoId: string, userId: string) {
+    await this.checkOrganizadorOStaff(torneoId, userId);
+
+    await this.prisma.partido.updateMany({
+      where: { torneoId, estado: EstadoPartido.PENDIENTE },
+      data: { estado: EstadoPartido.CONFIRMADO },
+    });
+
+    await this.prisma.torneo.update({
+      where: { id: torneoId },
+      data: { estado: 'EN_CURSO' },
+    });
+
+    this.logger.log(`Todos los partidos del torneo ${torneoId} confirmados`);
+    return { mensaje: 'Todos los partidos confirmados y torneo iniciado' };
+  }
+
   private async getRol(torneoId: string, userId: string): Promise<RolTorneo> {
     const participacion = await this.prisma.usuarioTorneo.findUnique({
       where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
     });
-    if (!participacion) throw new ForbiddenException('No participas en este torneo');
+    if (!participacion)
+      throw new ForbiddenException('No participas en este torneo');
     return participacion.rol;
   }
 
   private async checkOrganizadorOStaff(torneoId: string, userId: string) {
     const rol = await this.getRol(torneoId, userId);
-    const rolesPermitidos: RolTorneo[] = [RolTorneo.ORGANIZADOR, RolTorneo.STAFF];
+    const rolesPermitidos: RolTorneo[] = [
+      RolTorneo.ORGANIZADOR,
+      RolTorneo.STAFF,
+    ];
     if (!rolesPermitidos.includes(rol)) {
-      throw new ForbiddenException('Solo el organizador o staff puede realizar esta acción');
+      throw new ForbiddenException(
+        'Solo el organizador o staff puede realizar esta acción',
+      );
     }
   }
 }
