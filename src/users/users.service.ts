@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async findMe(userId: string) {
     const user = await this.prisma.usuario.findUnique({
@@ -64,6 +68,23 @@ export class UsersService {
 
     this.logger.log(`Perfil actualizado: ${userId}`);
     return updated;
+  }
+
+  async updatePhoto(userId: string, file: Express.Multer.File) {
+    const user = await this.prisma.usuario.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    if (user.fotoPerfil) {
+      await this.cloudinary.deleteByUrl(user.fotoPerfil).catch(() => null);
+    }
+
+    const result = await this.cloudinary.uploadStream(file.buffer, 'profile_photos');
+
+    return this.prisma.usuario.update({
+      where: { id: userId },
+      data: { fotoPerfil: result.secure_url },
+      select: { id: true, fotoPerfil: true },
+    });
   }
 
   async deleteMe(userId: string) {
