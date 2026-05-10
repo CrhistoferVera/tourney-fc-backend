@@ -86,6 +86,14 @@ export class TeamsService {
     this.logger.log(
       `Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`,
     );
+
+    await this.prisma.inscripcion.create({
+      data: {
+        torneoId,
+        equipoId: equipo.id,
+        estado: 'PENDIENTE',
+      },
+    });
     return equipo;
   }
 
@@ -133,7 +141,7 @@ export class TeamsService {
   // Listar equipos de un torneo
   async findAll(torneoId: string) {
     const equipos = await this.prisma.equipo.findMany({
-      where: { torneoId },
+      where: { torneoId, inscripcion: { estado: 'APROBADA' } },
       include: {
         jugadores: {
           include: {
