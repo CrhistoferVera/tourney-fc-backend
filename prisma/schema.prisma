@@ -106,6 +106,7 @@ model Torneo {
   fechaInicio     DateTime
   fechaFin        DateTime
   zona            String?
+  imagen          String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

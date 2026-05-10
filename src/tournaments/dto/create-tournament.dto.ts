@@ -65,4 +65,9 @@ export class CreateTournamentDto {
   @ValidateNested({ each: true })
   @Type(() => CampoJuegoDto)
   campos?: CampoJuegoDto[];
+
+  @ApiProperty({ example: 'https://cloudinary.com/image.png', required: false })
+  @IsOptional()
+  @IsString()
+  imagen?: string;
 }
