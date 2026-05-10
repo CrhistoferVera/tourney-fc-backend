@@ -212,4 +212,23 @@ export class UsersService {
       ultimosResultados: ultimosResultadosFormateados,
     };
   }
+async searchUsers(query: string) {
+  const searchTerm = query.trim();
+  if (!searchTerm) return [];
+  return this.prisma.usuario.findMany({
+    where: {
+      OR: [
+        { nombre: { contains: searchTerm, mode: 'insensitive' } },
+        { email: { contains: searchTerm, mode: 'insensitive' } },
+      ],
+    },
+    select: {
+      id: true,
+      nombre: true,
+      email: true,
+      fotoPerfil: true,
+    },
+    take: 20,
+  });
+}
 }
