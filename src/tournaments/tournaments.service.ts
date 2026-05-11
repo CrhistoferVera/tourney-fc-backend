@@ -12,6 +12,7 @@ import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { EstadoTorneo, RolTorneo } from '@prisma/client';
 import { Resend } from 'resend';
 import { ConfigService } from '@nestjs/config';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class TournamentsService {
@@ -21,8 +22,17 @@ export class TournamentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {
     this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
+  }
+
+  async uploadImage(file: Express.Multer.File) {
+    const result = await this.cloudinaryService.uploadStream(
+      file.buffer,
+      'tournaments',
+    );
+    return { url: result.secure_url };
   }
 
   async create(userId: string, dto: CreateTournamentDto) {
@@ -35,6 +45,7 @@ export class TournamentsService {
         fechaInicio: new Date(dto.fechaInicio),
         fechaFin: new Date(dto.fechaFin),
         zona: dto.zona,
+        imagen: dto.imagen,
         estado: EstadoTorneo.BORRADOR,
         campos: dto.campos
           ? {
@@ -150,6 +161,7 @@ export class TournamentsService {
       fechaInicio: t.fechaInicio,
       fechaFin: t.fechaFin,
       zona: t.zona,
+      imagen: t.imagen,
       campos: t.campos,
     }));
   }
@@ -179,6 +191,7 @@ export class TournamentsService {
         fechaInicio: p.torneo.fechaInicio,
         fechaFin: p.torneo.fechaFin,
         zona: p.torneo.zona,
+        imagen: p.torneo.imagen,
         rol: p.rol,
         campos: p.torneo.campos,
       }))
@@ -239,6 +252,7 @@ export class TournamentsService {
       fechaInicio: torneo.fechaInicio,
       fechaFin: torneo.fechaFin,
       zona: torneo.zona,
+      imagen: torneo.imagen,
       campos: torneo.campos,
       equipos: torneo.equipos,
       rolUsuario,
@@ -271,9 +285,16 @@ export class TournamentsService {
         fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
         fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
         zona: dto.zona,
+        imagen: dto.imagen,
       },
       include: { campos: true },
     });
+
+    if (dto.imagen && torneo.imagen && dto.imagen !== torneo.imagen) {
+      this.cloudinaryService.deleteByUrl(torneo.imagen).catch((err) => {
+        this.logger.error(`Error deleting old image: ${err.message}`);
+      });
+    }
 
     this.logger.log(`Torneo actualizado: ${id}`);
     return updated;

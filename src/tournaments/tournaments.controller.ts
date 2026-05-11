@@ -9,7 +9,11 @@ import {
   Query,
   UseGuards,
   Request,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -230,5 +234,15 @@ export class TournamentsController {
   @ApiResponse({ status: 404, description: 'Torneo no encontrado' })
   getStaff(@Param('id') id: string, @Request() req: any) {
     return this.tournamentsService.getStaff(id, req.user.id);
+  }
+
+  @Post('upload-image')
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiOperation({ summary: 'Subir imagen del torneo' })
+  @ApiResponse({ status: 201, description: 'Imagen subida correctamente' })
+  @ApiResponse({ status: 400, description: 'Archivo inválido' })
+  async uploadImage(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No se recibió ninguna imagen');
+    return this.tournamentsService.uploadImage(file);
   }
 }
