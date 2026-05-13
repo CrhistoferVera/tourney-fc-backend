@@ -140,6 +140,69 @@ export class TournamentsService {
     };
   }
 
+  async getInscripciones(torneoId: string, userId: string) {
+    await this.checkOrganizador(torneoId, userId);
+
+    const inscripciones = await this.prisma.inscripcion.findMany({
+      where: { torneoId, estado: 'PENDIENTE' },
+      include: {
+        equipo: {
+          include: {
+            jugadores: {
+              include: {
+                usuario: { select: { id: true, nombre: true, fotoPerfil: true, email: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return inscripciones.map((i) => ({
+      id: i.id,
+      estado: i.estado,
+      createdAt: i.createdAt,
+      equipo: {
+        id: i.equipo.id,
+        nombre: i.equipo.nombre,
+        escudo: i.equipo.escudo,
+        telefonoCapitan: i.equipo.telefonoCapitan,
+        cantidadJugadores: i.equipo.cantidadJugadores ?? i.equipo.jugadores.length,
+        jugadores: i.equipo.jugadores.map((j) => ({
+          id: j.usuario.id,
+          nombre: j.usuario.nombre,
+          email: j.usuario.email,
+          fotoPerfil: j.usuario.fotoPerfil,
+        })),
+      },
+    }));
+  }
+
+  async responderInscripcion(
+    torneoId: string,
+    inscripcionId: string,
+    userId: string,
+    accion: 'aprobar' | 'rechazar',
+  ) {
+    await this.checkOrganizador(torneoId, userId);
+
+    const inscripcion = await this.prisma.inscripcion.findUnique({
+      where: { id: inscripcionId },
+    });
+    if (inscripcion?.torneoId !== torneoId)
+      throw new NotFoundException('Solicitud no encontrada');
+    if (inscripcion.estado !== 'PENDIENTE')
+      throw new BadRequestException('Esta solicitud ya fue respondida');
+
+    await this.prisma.inscripcion.update({
+      where: { id: inscripcionId },
+      data: { estado: accion === 'aprobar' ? 'APROBADA' : 'RECHAZADA' },
+    });
+
+    return { mensaje: accion === 'aprobar' ? 'Equipo aprobado' : 'Equipo rechazado' };
+  }
+
   async findAll(query: QueryTournamentDto) {
     const torneos = await this.prisma.torneo.findMany({
       where: {
@@ -174,43 +237,75 @@ export class TournamentsService {
   }
 
   async findMy(userId: string) {
+    const usuario = await this.prisma.usuario.findUnique({ where: { id: userId } });
+
+    // Torneos donde tiene rol confirmado
     const participaciones = await this.prisma.usuarioTorneo.findMany({
       where: { usuarioId: userId },
       include: {
         torneo: {
-          include: {
-            campos: true,
-            _count: { select: { equipos: true } },
-          },
+          include: { campos: true, _count: { select: { equipos: true } } },
         },
       },
-      orderBy: { createdAt: 'desc' },
     });
 
-    return participaciones
-      .map((p) => ({
-        id: p.torneo.id,
-        nombre: p.torneo.nombre,
-        formato: p.torneo.formato,
-        estado: p.torneo.estado,
-        maxEquipos: p.torneo.maxEquipos,
-        equiposInscritos: p.torneo._count.equipos,
-        fechaInicio: p.torneo.fechaInicio,
-        fechaFin: p.torneo.fechaFin,
-        zona: p.torneo.zona,
-        imagen: p.torneo.imagen,
-        rol: p.rol,
-        campos: p.torneo.campos,
-      }))
-      .sort((a, b) => {
-        const orden: Record<string, number> = {
-          EN_CURSO: 0,
-          EN_INSCRIPCION: 1,
-          BORRADOR: 2,
-          FINALIZADO: 3,
-        };
-        return (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4);
-      });
+    // Torneos con invitación STAFF pendiente (aún no confirmados, ej. BORRADOR)
+    const invitacionesPendientes = usuario
+      ? await this.prisma.invitacionPendiente.findMany({
+          where: {
+            email: usuario.email,
+            tipo: TipoInvitacion.STAFF,
+            estado: EstadoInvitacion.PENDIENTE,
+          },
+          include: {
+            torneo: {
+              include: { campos: true, _count: { select: { equipos: true } } },
+            },
+          },
+        })
+      : [];
+
+    const confirmadosIds = new Set(participaciones.map((p) => p.torneo.id));
+
+    const confirmados = participaciones.map((p) => ({
+      id: p.torneo.id,
+      nombre: p.torneo.nombre,
+      formato: p.torneo.formato,
+      estado: p.torneo.estado,
+      maxEquipos: p.torneo.maxEquipos,
+      equiposInscritos: p.torneo._count.equipos,
+      fechaInicio: p.torneo.fechaInicio,
+      fechaFin: p.torneo.fechaFin,
+      zona: p.torneo.zona,
+      imagen: p.torneo.imagen,
+      rolUsuario: p.rol,
+      campos: p.torneo.campos,
+    }));
+
+    const pendientesStaff = invitacionesPendientes
+      .filter((i) => !confirmadosIds.has(i.torneo.id))
+      .map((i) => ({
+        id: i.torneo.id,
+        nombre: i.torneo.nombre,
+        formato: i.torneo.formato,
+        estado: i.torneo.estado,
+        maxEquipos: i.torneo.maxEquipos,
+        equiposInscritos: i.torneo._count.equipos,
+        fechaInicio: i.torneo.fechaInicio,
+        fechaFin: i.torneo.fechaFin,
+        zona: i.torneo.zona,
+        imagen: i.torneo.imagen,
+        rolUsuario: RolTorneo.STAFF,
+        campos: i.torneo.campos,
+      }));
+
+    const orden: Record<string, number> = {
+      EN_CURSO: 0, EN_INSCRIPCION: 1, BORRADOR: 2, FINALIZADO: 3,
+    };
+
+    return [...confirmados, ...pendientesStaff].sort(
+      (a, b) => (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4),
+    );
   }
 
   async findOne(id: string, userId: string) {
@@ -247,6 +342,20 @@ export class TournamentsService {
     );
     const rolUsuario = participacion?.rol ?? null;
 
+    const [inscripcionPendiente, equiposAprobados] = await Promise.all([
+      rolUsuario
+        ? Promise.resolve(null)
+        : this.prisma.inscripcion.findFirst({
+            where: {
+              torneoId: id,
+              estado: 'PENDIENTE',
+              equipo: { jugadores: { some: { usuarioId: userId } } },
+            },
+            select: { id: true },
+          }),
+      this.prisma.inscripcion.count({ where: { torneoId: id, estado: 'APROBADA' } }),
+    ]);
+
     return {
       id: torneo.id,
       nombre: torneo.nombre,
@@ -255,6 +364,7 @@ export class TournamentsService {
       estado: torneo.estado,
       maxEquipos: torneo.maxEquipos,
       equiposInscritos: torneo._count.equipos,
+      equiposAprobados,
       totalPartidos: torneo._count.partidos,
       fechaInicio: torneo.fechaInicio,
       fechaFin: torneo.fechaFin,
@@ -263,6 +373,7 @@ export class TournamentsService {
       campos: torneo.campos,
       equipos: torneo.equipos,
       rolUsuario,
+      tieneSolicitudPendiente: !!inscripcionPendiente,
       createdAt: torneo.createdAt,
     };
   }
@@ -393,6 +504,15 @@ export class TournamentsService {
     if (torneo._count.partidos === 0) {
       throw new BadRequestException(
         'Debes generar el fixture antes de iniciar el torneo',
+      );
+    }
+
+    const equiposAprobados = await this.prisma.inscripcion.count({
+      where: { torneoId: id, estado: 'APROBADA' },
+    });
+    if (equiposAprobados < torneo.maxEquipos) {
+      throw new BadRequestException(
+        `Faltan equipos aprobados: hay ${equiposAprobados} de ${torneo.maxEquipos} requeridos.`,
       );
     }
 

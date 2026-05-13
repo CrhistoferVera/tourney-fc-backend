@@ -8,7 +8,11 @@ import {
   Param,
   UseGuards,
   Request,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -62,6 +66,29 @@ export class TeamsController {
     return this.teamsService.findAll(torneoId);
   }
 
+  // ── Specific sub-routes BEFORE the generic /:id to avoid shadowing ──────────
+
+  @Get('tournament/:torneoId/my-team')
+  @ApiOperation({ summary: 'Obtener mi equipo en un torneo — CAPITAN o JUGADOR' })
+  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Datos del equipo con jugadores e invitaciones pendientes' })
+  @ApiResponse({ status: 404, description: 'No tienes equipo en este torneo' })
+  getMyTeam(@Param('torneoId') torneoId: string, @Request() req: any) {
+    return this.teamsService.getMyTeam(torneoId, req.user.id);
+  }
+
+  @Post('upload-escudo')
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiOperation({ summary: 'Subir escudo de equipo' })
+  @ApiResponse({ status: 201, description: 'Escudo subido correctamente' })
+  @ApiResponse({ status: 400, description: 'Archivo inválido' })
+  async uploadEscudo(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No se recibió ninguna imagen');
+    return this.teamsService.uploadEscudo(file);
+  }
+
+  // ── Generic /:id routes ──────────────────────────────────────────────────────
+
   @Get(':id')
   @ApiOperation({
     summary: 'Detalle de un equipo',
@@ -109,6 +136,20 @@ export class TeamsController {
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   remove(@Param('id') id: string, @Request() req: any) {
     return this.teamsService.remove(id, req.user.id);
+  }
+
+  @Post(':id/invite-player')
+  @ApiOperation({ summary: 'Invitar jugador al equipo por correo — solo CAPITAN' })
+  @ApiParam({ name: 'id', description: 'UUID del equipo' })
+  @ApiResponse({ status: 201, description: 'Jugador invitado correctamente' })
+  @ApiResponse({ status: 403, description: 'Solo el capitán puede invitar jugadores' })
+  @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
+  invitePlayer(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { email: string },
+  ) {
+    return this.teamsService.invitePlayer(id, req.user.id, body.email);
   }
 
   @Post(':id/join')

@@ -11,6 +11,7 @@ import {
   UseInterceptors,
   BadRequestException,
   Query,
+  Post,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Multer } from 'multer';
@@ -106,6 +107,30 @@ export class UsersController {
   getDashboard(@Request() req: any) {
     return this.usersService.getDashboard(req.user.id);
   }
+  @UseGuards(JwtAuthGuard)
+  @Get('me/invitaciones')
+  @ApiOperation({ summary: 'Obtener invitaciones pendientes del usuario' })
+  @ApiResponse({ status: 200, description: 'Lista de invitaciones pendientes' })
+  getInvitaciones(@Request() req: any) {
+    return this.usersService.getInvitaciones(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/invitaciones/:id/aceptar')
+  @ApiOperation({ summary: 'Aceptar una invitación pendiente' })
+  @ApiResponse({ status: 200, description: 'Invitación aceptada' })
+  aceptarInvitacion(@Request() req: any, @Param('id') id: string) {
+    return this.usersService.responderInvitacion(req.user.id, id, 'aceptar');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/invitaciones/:id/rechazar')
+  @ApiOperation({ summary: 'Rechazar una invitación pendiente' })
+  @ApiResponse({ status: 200, description: 'Invitación rechazada' })
+  rechazarInvitacion(@Request() req: any, @Param('id') id: string) {
+    return this.usersService.responderInvitacion(req.user.id, id, 'rechazar');
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   @ApiOperation({

@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { EstadoInvitacion, TipoInvitacion, RolTorneo } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -212,23 +219,96 @@ export class UsersService {
       ultimosResultados: ultimosResultadosFormateados,
     };
   }
-async searchUsers(query: string) {
-  const searchTerm = query.trim();
-  if (!searchTerm) return [];
-  return this.prisma.usuario.findMany({
-    where: {
-      OR: [
-        { nombre: { contains: searchTerm, mode: 'insensitive' } },
-        { email: { contains: searchTerm, mode: 'insensitive' } },
-      ],
-    },
-    select: {
-      id: true,
-      nombre: true,
-      email: true,
-      fotoPerfil: true,
-    },
-    take: 20,
-  });
-}
+  async searchUsers(query: string) {
+    const searchTerm = query.trim();
+    if (!searchTerm) return [];
+    return this.prisma.usuario.findMany({
+      where: {
+        OR: [
+          { nombre: { contains: searchTerm, mode: 'insensitive' } },
+          { email: { contains: searchTerm, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        nombre: true,
+        email: true,
+        fotoPerfil: true,
+      },
+      take: 20,
+    });
+  }
+
+  async getInvitaciones(userId: string) {
+    const user = await this.prisma.usuario.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    return this.prisma.invitacionPendiente.findMany({
+      where: { email: user.email, estado: EstadoInvitacion.PENDIENTE },
+      include: {
+        torneo: { select: { id: true, nombre: true, imagen: true } },
+        equipo: { select: { id: true, nombre: true } },
+        invitador: { select: { id: true, nombre: true, fotoPerfil: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async responderInvitacion(
+    userId: string,
+    invitacionId: string,
+    accion: 'aceptar' | 'rechazar',
+  ) {
+    const user = await this.prisma.usuario.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const invitacion = await this.prisma.invitacionPendiente.findUnique({
+      where: { id: invitacionId },
+    });
+    if (!invitacion) throw new NotFoundException('Invitación no encontrada');
+    if (invitacion.email !== user.email)
+      throw new ForbiddenException('No tienes acceso a esta invitación');
+    if (invitacion.estado !== EstadoInvitacion.PENDIENTE)
+      throw new BadRequestException('Esta invitación ya fue respondida');
+
+    if (accion === 'rechazar') {
+      await this.prisma.invitacionPendiente.update({
+        where: { id: invitacionId },
+        data: { estado: EstadoInvitacion.RECHAZADA, usuarioId: userId },
+      });
+      return { mensaje: 'Invitación rechazada' };
+    }
+
+    // Aceptar
+    if (invitacion.tipo === TipoInvitacion.STAFF) {
+      await this.prisma.usuarioTorneo.upsert({
+        where: { usuarioId_torneoId: { usuarioId: userId, torneoId: invitacion.torneoId } },
+        update: { rol: RolTorneo.STAFF },
+        create: { usuarioId: userId, torneoId: invitacion.torneoId, rol: RolTorneo.STAFF },
+      });
+    } else if (invitacion.tipo === TipoInvitacion.JUGADOR) {
+      if (invitacion.equipoId) {
+        const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
+          where: { usuarioId_equipoId: { usuarioId: userId, equipoId: invitacion.equipoId } },
+        });
+        if (!yaEsMiembro) {
+          await this.prisma.usuarioEquipo.create({
+            data: { usuarioId: userId, equipoId: invitacion.equipoId },
+          });
+        }
+      }
+      await this.prisma.usuarioTorneo.upsert({
+        where: { usuarioId_torneoId: { usuarioId: userId, torneoId: invitacion.torneoId } },
+        update: {},
+        create: { usuarioId: userId, torneoId: invitacion.torneoId, rol: RolTorneo.JUGADOR },
+      });
+    }
+
+    await this.prisma.invitacionPendiente.update({
+      where: { id: invitacionId },
+      data: { estado: EstadoInvitacion.ACEPTADA, usuarioId: userId },
+    });
+
+    return { mensaje: 'Invitación aceptada' };
+  }
 }

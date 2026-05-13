@@ -236,6 +236,40 @@ export class TournamentsController {
     return this.tournamentsService.getStaff(id, req.user.id);
   }
 
+  @Get(':id/inscripciones')
+  @ApiOperation({ summary: 'Listar solicitudes de inscripción pendientes — solo ORGANIZADOR' })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Solicitudes pendientes con datos del equipo' })
+  getInscripciones(@Param('id') id: string, @Request() req: any) {
+    return this.tournamentsService.getInscripciones(id, req.user.id);
+  }
+
+  @Patch(':id/inscripciones/:inscripcionId/aprobar')
+  @ApiOperation({ summary: 'Aprobar solicitud de inscripción — solo ORGANIZADOR' })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiParam({ name: 'inscripcionId', description: 'UUID de la inscripción' })
+  @ApiResponse({ status: 200, description: 'Equipo aprobado' })
+  aprobarInscripcion(
+    @Param('id') id: string,
+    @Param('inscripcionId') inscripcionId: string,
+    @Request() req: any,
+  ) {
+    return this.tournamentsService.responderInscripcion(id, inscripcionId, req.user.id, 'aprobar');
+  }
+
+  @Patch(':id/inscripciones/:inscripcionId/rechazar')
+  @ApiOperation({ summary: 'Rechazar solicitud de inscripción — solo ORGANIZADOR' })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiParam({ name: 'inscripcionId', description: 'UUID de la inscripción' })
+  @ApiResponse({ status: 200, description: 'Equipo rechazado' })
+  rechazarInscripcion(
+    @Param('id') id: string,
+    @Param('inscripcionId') inscripcionId: string,
+    @Request() req: any,
+  ) {
+    return this.tournamentsService.responderInscripcion(id, inscripcionId, req.user.id, 'rechazar');
+  }
+
   @Post('upload-image')
   @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({ summary: 'Subir imagen del torneo' })
