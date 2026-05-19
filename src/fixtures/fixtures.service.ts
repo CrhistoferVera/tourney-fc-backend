@@ -45,26 +45,17 @@ export class FixturesService {
         ? this.generarLiga(equipos)
         : this.generarCopa(equipos);
 
-    const fechaInicio = new Date(torneo.fechaInicio);
-    const fechaFin = new Date(torneo.fechaFin);
-    const totalDias = Math.floor(
-      (fechaFin.getTime() - fechaInicio.getTime()) / (1000 * 60 * 60 * 24),
-    );
-    const intervaloDias =
-      totalDias > 0 && partidos.length > 0
-        ? Math.floor(totalDias / partidos.length)
-        : 1;
+    const partidosSinFecha = partidos.map((p) => ({
+      ...p,
+      torneoId,
+      fecha: null,
+      estado: EstadoPartido.PENDIENTE,
+    }));
 
-    const partidosConFecha = partidos.map((p, i) => {
-      const fecha = new Date(fechaInicio);
-      fecha.setDate(fecha.getDate() + i * intervaloDias);
-      return { ...p, torneoId, fecha, estado: EstadoPartido.PENDIENTE };
-    });
-
-    await this.prisma.partido.createMany({ data: partidosConFecha });
+    await this.prisma.partido.createMany({ data: partidosSinFecha });
 
     this.logger.log(
-      `Fixture generado para torneo: ${torneoId} con ${partidosConFecha.length} partidos`,
+      `Fixture generado para torneo: ${torneoId} con ${partidosSinFecha.length} partidos`,
     );
     return this.findAll(torneoId);
   }

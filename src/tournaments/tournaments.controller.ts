@@ -270,6 +270,17 @@ export class TournamentsController {
     return this.tournamentsService.responderInscripcion(id, inscripcionId, req.user.id, 'rechazar');
   }
 
+  @Get(':id/campos')
+  @ApiOperation({
+    summary: 'Listar canchas del torneo',
+    description: 'Retorna las canchas registradas para el torneo',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Lista de canchas' })
+  getCampos(@Param('id') id: string) {
+    return this.tournamentsService.getCampos(id);
+  }
+
   @Post('upload-image')
   @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({ summary: 'Subir imagen del torneo' })

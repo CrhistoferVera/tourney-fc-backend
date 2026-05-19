@@ -552,4 +552,12 @@ export class TournamentsService {
       );
     }
   }
+
+  async getCampos(torneoId: string) {
+    return this.prisma.campoJuego.findMany({
+      where: { torneoId },
+      select: { id: true, nombre: true, direccion: true },
+      orderBy: { nombre: 'asc' },
+    });
+  }
 }
