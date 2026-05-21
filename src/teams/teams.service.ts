@@ -202,13 +202,40 @@ export class TeamsService {
               select: { id: true, nombre: true, fotoPerfil: true, email: true },
             },
           },
+          orderBy: { createdAt: 'asc' },
         },
         torneo: { select: { id: true, nombre: true } },
       },
     });
 
     if (!equipo) throw new NotFoundException('Equipo no encontrado');
-    return equipo;
+
+    const jugadorIds = equipo.jugadores.map((j) => j.usuarioId);
+    const capitan = await this.prisma.usuarioTorneo.findFirst({
+      where: {
+        torneoId: equipo.torneoId,
+        usuarioId: { in: jugadorIds },
+        rol: RolTorneo.CAPITAN,
+      },
+      select: { usuarioId: true },
+    });
+
+    return {
+      id: equipo.id,
+      nombre: equipo.nombre,
+      escudo: equipo.escudo,
+      telefonoCapitan: equipo.telefonoCapitan,
+      cantidadJugadores: equipo.cantidadJugadores ?? equipo.jugadores.length,
+      jugadores: equipo.jugadores.map((j) => ({
+        id: j.usuario.id,
+        nombre: j.usuario.nombre,
+        fotoPerfil: j.usuario.fotoPerfil,
+        email: j.usuario.email,
+      })),
+      createdAt: equipo.createdAt,
+      torneo: equipo.torneo,
+      capitanId: capitan?.usuarioId ?? null,
+    };
   }
 
   // Editar equipo — solo CAPITAN u ORGANIZADOR/STAFF
