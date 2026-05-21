@@ -54,6 +54,18 @@ export class FixturesController {
     return this.fixturesService.findAll(torneoId);
   }
 
+  @Get('tournament/:torneoId/standings')
+  @ApiOperation({
+    summary: 'Tabla de posiciones',
+    description: 'Tabla de liga ordenada por puntos — solo torneos formato LIGA',
+  })
+  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Tabla de posiciones' })
+  @ApiResponse({ status: 400, description: 'El torneo no es formato Liga' })
+  getStandings(@Param('torneoId') torneoId: string) {
+    return this.fixturesService.getStandings(torneoId);
+  }
+
   @Get('tournament/:torneoId/equipo/:equipoId')
   @ApiOperation({
     summary: 'Ver fixture de un equipo',

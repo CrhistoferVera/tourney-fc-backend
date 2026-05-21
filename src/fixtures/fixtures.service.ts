@@ -90,6 +90,133 @@ export class FixturesService {
     }));
   }
 
+  // Tabla de posiciones — solo formato LIGA
+  async getStandings(torneoId: string) {
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: torneoId },
+      select: { id: true, nombre: true, formato: true },
+    });
+    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+    if (torneo.formato !== FormatoTorneo.LIGA) {
+      throw new BadRequestException(
+        'La tabla de posiciones solo está disponible para torneos en formato Liga',
+      );
+    }
+
+    const equipos = await this.prisma.equipo.findMany({
+      where: { torneoId, inscripcion: { estado: 'APROBADA' } },
+      select: { id: true, nombre: true, escudo: true },
+      orderBy: { nombre: 'asc' },
+    });
+
+    type FilaTabla = {
+      equipo: { id: string; nombre: string; escudo: string | null };
+      pj: number;
+      g: number;
+      e: number;
+      p: number;
+      gf: number;
+      gc: number;
+      dg: number;
+      pts: number;
+    };
+
+    const filas = new Map<string, FilaTabla>(
+      equipos.map((e) => [
+        e.id,
+        {
+          equipo: e,
+          pj: 0,
+          g: 0,
+          e: 0,
+          p: 0,
+          gf: 0,
+          gc: 0,
+          dg: 0,
+          pts: 0,
+        },
+      ]),
+    );
+
+    const partidos = await this.prisma.partido.findMany({
+      where: {
+        torneoId,
+        estado: EstadoPartido.CONFIRMADO,
+        golesLocal: { not: null },
+        golesVisitante: { not: null },
+      },
+      select: {
+        equipoLocalId: true,
+        equipoVisitanteId: true,
+        golesLocal: true,
+        golesVisitante: true,
+      },
+    });
+
+    const aplicarResultado = (
+      equipoId: string,
+      golesFavor: number,
+      golesContra: number,
+    ) => {
+      const fila = filas.get(equipoId);
+      if (!fila) return;
+      fila.pj += 1;
+      fila.gf += golesFavor;
+      fila.gc += golesContra;
+      fila.dg = fila.gf - fila.gc;
+      if (golesFavor > golesContra) {
+        fila.g += 1;
+        fila.pts += 3;
+      } else if (golesFavor < golesContra) {
+        fila.p += 1;
+      } else {
+        fila.e += 1;
+        fila.pts += 1;
+      }
+    };
+
+    for (const partido of partidos) {
+      aplicarResultado(
+        partido.equipoLocalId,
+        partido.golesLocal!,
+        partido.golesVisitante!,
+      );
+      aplicarResultado(
+        partido.equipoVisitanteId,
+        partido.golesVisitante!,
+        partido.golesLocal!,
+      );
+    }
+
+    const tabla = [...filas.values()]
+      .sort(
+        (a, b) =>
+          b.pts - a.pts ||
+          b.dg - a.dg ||
+          b.gf - a.gf ||
+          a.gc - b.gc ||
+          a.equipo.nombre.localeCompare(b.equipo.nombre, 'es'),
+      )
+      .map((fila, index) => ({
+        posicion: index + 1,
+        ...fila,
+      }));
+
+    return {
+      torneoId: torneo.id,
+      torneoNombre: torneo.nombre,
+      formato: torneo.formato,
+      criteriosDesempate: [
+        'Puntos (mayor a menor)',
+        'Diferencia de goles (DG)',
+        'Goles a favor (GF)',
+        'Goles en contra (GC, menor es mejor)',
+        'Nombre del equipo (A–Z)',
+      ],
+      tabla,
+    };
+  }
+
   // Ver fixture de un equipo — HU-19
   async findByEquipo(torneoId: string, equipoId: string) {
     return this.prisma.partido.findMany({
