@@ -8,7 +8,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
-import { RolTorneo, TipoInvitacion, EstadoInvitacion } from '@prisma/client';
+import {
+  RolTorneo,
+  TipoInvitacion,
+  EstadoInvitacion,
+  TipoEvento,
+} from '@prisma/client';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
@@ -202,13 +207,111 @@ export class TeamsService {
               select: { id: true, nombre: true, fotoPerfil: true, email: true },
             },
           },
+          orderBy: { createdAt: 'asc' },
         },
         torneo: { select: { id: true, nombre: true } },
       },
     });
 
     if (!equipo) throw new NotFoundException('Equipo no encontrado');
-    return equipo;
+
+    const jugadorIds = equipo.jugadores.map((j) => j.usuarioId);
+    const capitan = await this.prisma.usuarioTorneo.findFirst({
+      where: {
+        torneoId: equipo.torneoId,
+        usuarioId: { in: jugadorIds },
+        rol: RolTorneo.CAPITAN,
+      },
+      select: { usuarioId: true },
+    });
+
+    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
+      equipo.torneoId,
+      equipoId,
+      jugadorIds,
+    );
+
+    return {
+      id: equipo.id,
+      nombre: equipo.nombre,
+      escudo: equipo.escudo,
+      telefonoCapitan: equipo.telefonoCapitan,
+      cantidadJugadores: equipo.cantidadJugadores ?? equipo.jugadores.length,
+      jugadores: equipo.jugadores.map((j) => ({
+        id: j.usuario.id,
+        nombre: j.usuario.nombre,
+        fotoPerfil: j.usuario.fotoPerfil,
+        email: j.usuario.email,
+        estadisticas: estadisticasPorJugador.get(j.usuario.id) ?? {
+          goles: 0,
+          asistencias: 0,
+          tarjetasAmarillas: 0,
+          tarjetasRojas: 0,
+        },
+      })),
+      createdAt: equipo.createdAt,
+      torneo: equipo.torneo,
+      capitanId: capitan?.usuarioId ?? null,
+    };
+  }
+
+  private async getEstadisticasJugadoresTorneo(
+    torneoId: string,
+    equipoId: string,
+    jugadorIds: string[],
+  ) {
+    const vacias = () => ({
+      goles: 0,
+      asistencias: 0,
+      tarjetasAmarillas: 0,
+      tarjetasRojas: 0,
+    });
+
+    const mapa = new Map(
+      jugadorIds.map((id) => [id, vacias()] as const),
+    );
+
+    if (jugadorIds.length === 0) return mapa;
+
+    const eventos = await this.prisma.eventoPartido.findMany({
+      where: {
+        jugadorId: { in: jugadorIds },
+        tipo: {
+          in: [
+            TipoEvento.GOL,
+            TipoEvento.ASISTENCIA,
+            TipoEvento.TARJETA_AMARILLA,
+            TipoEvento.TARJETA_ROJA,
+          ],
+        },
+        partido: {
+          torneoId,
+          OR: [{ equipoLocalId: equipoId }, { equipoVisitanteId: equipoId }],
+        },
+      },
+      select: { jugadorId: true, tipo: true },
+    });
+
+    for (const evento of eventos) {
+      const stats = mapa.get(evento.jugadorId);
+      if (!stats) continue;
+      switch (evento.tipo) {
+        case TipoEvento.GOL:
+          stats.goles += 1;
+          break;
+        case TipoEvento.ASISTENCIA:
+          stats.asistencias += 1;
+          break;
+        case TipoEvento.TARJETA_AMARILLA:
+          stats.tarjetasAmarillas += 1;
+          break;
+        case TipoEvento.TARJETA_ROJA:
+          stats.tarjetasRojas += 1;
+          break;
+      }
+    }
+
+    return mapa;
   }
 
   // Editar equipo — solo CAPITAN u ORGANIZADOR/STAFF
@@ -335,7 +438,28 @@ export class TeamsService {
       select: { usuarioId: true },
     });
 
-    return { ...equipo, capitanId: capitan?.usuarioId ?? null };
+    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
+      torneoId,
+      equipoId,
+      jugadorIds,
+    );
+
+    return {
+      ...equipo,
+      capitanId: capitan?.usuarioId ?? null,
+      jugadores: equipo.jugadores.map((j) => ({
+        ...j,
+        usuario: {
+          ...j.usuario,
+          estadisticas: estadisticasPorJugador.get(j.usuarioId) ?? {
+            goles: 0,
+            asistencias: 0,
+            tarjetasAmarillas: 0,
+            tarjetasRojas: 0,
+          },
+        },
+      })),
+    };
   }
 
   async invitePlayer(teamId: string, userId: string, email: string) {
