@@ -15,6 +15,8 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RegisterDeviceDto } from './dto/register-device.dto';
+import { UnregisterDeviceDto } from './dto/unregister-device.dto';
 
 @Injectable()
 export class AuthService {
@@ -216,5 +218,34 @@ export class AuthService {
 
     this.logger.log(`Contraseña restablecida para: ${dto.email}`);
     return { mensaje: 'Contraseña restablecida exitosamente' };
+  }
+
+  async registerDevice(userId: string, dto: RegisterDeviceDto) {
+    await this.prisma.usuarioDevice.upsert({
+      where: { token: dto.token },
+      create: {
+        usuarioId: userId,
+        token: dto.token,
+        dispositivo: dto.dispositivo ?? null,
+      },
+      update: {
+        usuarioId: userId,
+        dispositivo: dto.dispositivo ?? null,
+      },
+    });
+
+    this.logger.log(`Dispositivo registrado para usuario ${userId}`);
+    return { mensaje: 'Dispositivo registrado' };
+  }
+
+  async unregisterDevice(userId: string, dto: UnregisterDeviceDto) {
+    const deleted = await this.prisma.usuarioDevice.deleteMany({
+      where: { token: dto.token, usuarioId: userId },
+    });
+
+    this.logger.log(
+      `Dispositivo desvinculado para usuario ${userId} (${deleted.count} registro(s))`,
+    );
+    return { mensaje: 'Dispositivo desvinculado' };
   }
 }

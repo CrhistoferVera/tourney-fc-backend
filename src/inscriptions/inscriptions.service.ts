@@ -8,13 +8,22 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInscriptionDto } from './dto/create-inscription.dto';
 import { UpdateInscriptionDto } from './dto/update-inscription.dto';
-import { EstadoInscripcion, EstadoTorneo, RolTorneo } from '@prisma/client';
+import {
+  EstadoInscripcion,
+  EstadoTorneo,
+  RolTorneo,
+  TipoNotificacion,
+} from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class InscriptionsService {
   private readonly logger = new Logger(InscriptionsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // Solicitar inscripción — HU-13
   async create(torneoId: string, userId: string, dto: CreateInscriptionDto) {
@@ -134,8 +143,38 @@ export class InscriptionsService {
     const updated = await this.prisma.inscripcion.update({
       where: { id: inscripcionId },
       data: { estado: dto.estado },
-      include: { equipo: true },
+      include: { equipo: true, torneo: { select: { nombre: true } } },
     });
+
+    if (
+      dto.estado === EstadoInscripcion.APROBADA ||
+      dto.estado === EstadoInscripcion.RECHAZADA
+    ) {
+      const capitan = await this.prisma.usuarioTorneo.findFirst({
+        where: {
+          torneoId: inscripcion.torneoId,
+          rol: RolTorneo.CAPITAN,
+          usuario: {
+            equipos: { some: { equipoId: inscripcion.equipoId } },
+          },
+        },
+        select: { usuarioId: true },
+      });
+
+      if (capitan) {
+        const aprobada = dto.estado === EstadoInscripcion.APROBADA;
+        await this.notificationsService.create({
+          usuarioId: capitan.usuarioId,
+          torneoId: inscripcion.torneoId,
+          tipo: aprobada
+            ? TipoNotificacion.INSCRIPCION_APROBADA
+            : TipoNotificacion.INSCRIPCION_RECHAZADA,
+          mensaje: aprobada
+            ? `Tu equipo "${updated.equipo.nombre}" fue aprobado en ${updated.torneo.nombre}`
+            : `Tu equipo "${updated.equipo.nombre}" fue rechazado en ${updated.torneo.nombre}`,
+        });
+      }
+    }
 
     this.logger.log(
       `Inscripción ${inscripcionId} actualizada a: ${dto.estado}`,

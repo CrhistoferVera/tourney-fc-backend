@@ -11,13 +11,14 @@ import { InscriptionsModule } from './inscriptions/inscriptions.module';
 import { FixturesModule } from './fixtures/fixtures.module';
 import { MatchesModule } from './matches/matches.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-
-
+import { FirebaseModule } from './firebase/firebase.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    FirebaseModule,
     AuthModule,
     UsersModule,
     TournamentsModule,
@@ -26,7 +27,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     FixturesModule,
     MatchesModule,
     CloudinaryModule,
-
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

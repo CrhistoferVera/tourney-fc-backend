@@ -1,6 +1,17 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RegisterDeviceDto } from './dto/register-device.dto';
+import { UnregisterDeviceDto } from './dto/unregister-device.dto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -108,5 +119,35 @@ export class AuthController {
   })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Post('register-device')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Registrar token FCM del dispositivo',
+    description: 'Asocia el token push nativo al usuario autenticado (1:N dispositivos)',
+  })
+  @ApiBody({ type: RegisterDeviceDto })
+  @ApiResponse({ status: 200, description: 'Token registrado o actualizado' })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido' })
+  registerDevice(@Request() req: { user: { id: string } }, @Body() dto: RegisterDeviceDto) {
+    return this.authService.registerDevice(req.user.id, dto);
+  }
+
+  @Post('unregister-device')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Desvincular token FCM del dispositivo',
+    description: 'Elimina el token del dispositivo actual al cerrar sesión',
+  })
+  @ApiBody({ type: UnregisterDeviceDto })
+  @ApiResponse({ status: 200, description: 'Token eliminado' })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido' })
+  unregisterDevice(@Request() req: { user: { id: string } }, @Body() dto: UnregisterDeviceDto) {
+    return this.authService.unregisterDevice(req.user.id, dto);
   }
 }
