@@ -100,6 +100,7 @@ model Usuario {
   enlacesInvitacion     EnlaceInvitacion[]
   invitacionesEnviadas  InvitacionPendiente[] @relation("Invitador")
   invitacionesRecibidas InvitacionPendiente[] @relation("Invitado")
+  devices               UsuarioDevice[]
 
   @@map("usuarios")
 }
@@ -349,4 +350,22 @@ model InvitacionPendiente {
 
   @@unique([torneoId, email, tipo])
   @@map("invitaciones_pendientes")
+}
+
+// ─────────────────────────────────────────
+// DISPOSITIVOS / TOKENS PUSH
+// ─────────────────────────────────────────
+
+model UsuarioDevice {
+  id         String   @id @default(uuid())
+  usuarioId  String
+  token      String   @unique // El "chorizote" único de Firebase
+  dispositivo String?  // Opcional: Para guardar la marca/modelo (ej. "Xiaomi Redmi Note 11")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relación con la tabla de usuarios
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@map("usuario_devices")
 }

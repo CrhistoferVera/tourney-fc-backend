@@ -58,3 +58,5 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /generated/prisma
 .package-lock.json
 test-report/
+
+tourneyfc-v1-firebase-adminsdk-fbsvc-b6a7aa44bd.json
