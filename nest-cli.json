@@ -4,13 +4,6 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "plugins": ["@nestjs/swagger"],
-    "deleteOutDir": true,
-    "assets": [
-      {
-        "include": "../generated/prisma/package.json",
-        "outDir": "./dist/generated",
-        "watchAssets": true
-      }
-    ]
+    "deleteOutDir": true
   }
 }
