@@ -293,6 +293,7 @@ export class TeamsService {
     });
 
     for (const evento of eventos) {
+      if (!evento.jugadorId) continue;
       const stats = mapa.get(evento.jugadorId);
       if (!stats) continue;
       switch (evento.tipo) {

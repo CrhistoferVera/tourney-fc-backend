@@ -39,6 +39,12 @@ enum EstadoInscripcion {
   RECHAZADA
 }
 
+enum ModalidadFutbol {
+  FUTBOL_5
+  FUTBOL_7
+  FUTBOL_11
+}
+
 enum EstadoPartido {
   PENDIENTE
   EN_CURSO
@@ -47,12 +53,22 @@ enum EstadoPartido {
   CONFIRMADO
 }
 
+enum FaseJuego {
+  PREVIA
+  PRIMER_TIEMPO
+  MEDIO_TIEMPO
+  SEGUNDO_TIEMPO
+  FINALIZADO
+}
+
 enum TipoEvento {
   GOL
   ASISTENCIA
   TARJETA_AMARILLA
   TARJETA_ROJA
   CAMBIO
+  FALTA
+  CORNER
 }
 
 enum TipoNotificacion {
@@ -109,18 +125,20 @@ model Usuario {
 // ─────────────────────────────────────────
 
 model Torneo {
-  id              String        @id @default(uuid())
-  nombre          String
-  descripcion     String?
-  formato         FormatoTorneo
-  maxEquipos      Int
-  estado          EstadoTorneo  @default(BORRADOR)
-  fechaInicio     DateTime
-  fechaFin        DateTime
-  zona            String?
-  imagen          String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                    String             @id @default(uuid())
+  nombre                String
+  descripcion           String?
+  formato               FormatoTorneo
+  modalidad             ModalidadFutbol?
+  maxEquipos            Int
+  maxJugadoresPorEquipo Int?
+  estado                EstadoTorneo       @default(BORRADOR)
+  fechaInicio           DateTime
+  fechaFin              DateTime
+  zona                  String?
+  imagen                String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   // Relaciones
   campos            CampoJuego[]
@@ -189,6 +207,7 @@ model Equipo {
   partidosLocal     Partido[]             @relation("EquipoLocal")
   partidosVisitante Partido[]             @relation("EquipoVisitante")
   invitaciones      InvitacionPendiente[]
+  eventos           EventoPartido[]
 
   @@map("equipos")
 }
@@ -263,6 +282,11 @@ model Partido {
   ronda            Int?
   fase             String?
 
+  // Cronómetro y estado en vivo
+  faseJuego        FaseJuego     @default(PREVIA)
+  minutosJugados   Int           @default(0)
+  cronometroIniciadoEn DateTime?
+
   golesLocal       Int?
   golesVisitante   Int?
 
@@ -289,14 +313,16 @@ model Partido {
 model EventoPartido {
   id         String     @id @default(uuid())
   partidoId  String
-  jugadorId  String
+  equipoId   String
+  jugadorId  String?
   tipo       TipoEvento
   minuto     Int?
   detalle    String?
   createdAt  DateTime   @default(now())
 
   partido    Partido    @relation(fields: [partidoId], references: [id])
-  jugador    Usuario    @relation(fields: [jugadorId], references: [id])
+  equipo     Equipo     @relation(fields: [equipoId], references: [id])
+  jugador    Usuario?   @relation(fields: [jugadorId], references: [id])
 
   @@map("eventos_partido")
 }

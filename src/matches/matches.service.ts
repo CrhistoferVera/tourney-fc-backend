@@ -7,7 +7,9 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateMatchDto } from './dto/update-match.dto';
-import { EstadoPartido, RolTorneo } from '@prisma/client';
+import { MatchControlDto, MatchControlAction } from './dto/match-control.dto';
+import { MatchEventDto } from './dto/match-event.dto';
+import { EstadoPartido, RolTorneo, FaseJuego, TipoEvento } from '@prisma/client';
 
 @Injectable()
 export class MatchesService {
@@ -25,6 +27,13 @@ export class MatchesService {
         campo: { select: { id: true, nombre: true, direccion: true } },
         torneo: {
           select: { id: true, nombre: true, fechaInicio: true, fechaFin: true },
+        },
+        eventos: {
+          include: {
+            jugador: { select: { id: true, nombre: true } },
+            equipo: { select: { id: true, nombre: true, escudo: true } },
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -177,5 +186,130 @@ export class MatchesService {
         'Solo el organizador o staff puede realizar esta acción',
       );
     }
+  }
+
+  // ---- Control de Partido en Vivo ----
+
+  async controlLiveMatch(partidoId: string, userId: string, dto: MatchControlDto) {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+    });
+    if (!partido) throw new NotFoundException('Partido no encontrado');
+    await this.checkOrganizadorOStaff(partido.torneoId, userId);
+
+    let data: any = {};
+    const now = new Date();
+
+    if (dto.action === MatchControlAction.START_FIRST_HALF) {
+      if (partido.estado === EstadoPartido.CONFIRMADO || partido.estado === EstadoPartido.PENDIENTE) {
+        data.estado = EstadoPartido.EN_CURSO;
+      }
+      data.faseJuego = FaseJuego.PRIMER_TIEMPO;
+      data.cronometroIniciadoEn = now;
+      if (partido.golesLocal === null) data.golesLocal = 0;
+      if (partido.golesVisitante === null) data.golesVisitante = 0;
+    } else if (dto.action === MatchControlAction.PAUSE_HALF_TIME) {
+      data.faseJuego = FaseJuego.MEDIO_TIEMPO;
+      // Guardar el tiempo jugado hasta el momento
+      if (partido.cronometroIniciadoEn) {
+        const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
+        data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
+      }
+      data.cronometroIniciadoEn = null;
+    } else if (dto.action === MatchControlAction.START_SECOND_HALF) {
+      data.faseJuego = FaseJuego.SEGUNDO_TIEMPO;
+      data.cronometroIniciadoEn = now;
+    } else if (dto.action === MatchControlAction.END_MATCH) {
+      data.faseJuego = FaseJuego.FINALIZADO;
+      data.estado = EstadoPartido.EN_DISPUTA; // O FINALIZADO, si prefieres. Actualmente la App no tiene FINALIZADO, usa EN_DISPUTA o espera confirmación. 
+      // Calculamos tiempo total
+      if (partido.cronometroIniciadoEn) {
+        const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
+        data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
+      }
+      data.cronometroIniciadoEn = null;
+    }
+
+    const updated = await this.prisma.partido.update({
+      where: { id: partidoId },
+      data,
+    });
+
+    this.logger.log(`Partido ${partidoId} cambió de fase a ${updated.faseJuego}`);
+    return updated;
+  }
+
+  async addEvent(partidoId: string, userId: string, dto: MatchEventDto) {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+    });
+    if (!partido) throw new NotFoundException('Partido no encontrado');
+    await this.checkOrganizadorOStaff(partido.torneoId, userId);
+
+    const evento = await this.prisma.eventoPartido.create({
+      data: {
+        partidoId,
+        tipo: dto.tipo,
+        equipoId: dto.equipoId,
+        jugadorId: dto.jugadorId,
+        minuto: dto.minuto,
+        detalle: dto.detalle,
+      },
+      include: {
+        jugador: { select: { id: true, nombre: true } },
+        equipo: { select: { id: true, nombre: true, escudo: true } },
+      }
+    });
+
+    // Actualizar goles si es GOL
+    if (dto.tipo === TipoEvento.GOL) {
+      if (dto.equipoId === partido.equipoLocalId) {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: { golesLocal: { increment: 1 } },
+        });
+      } else if (dto.equipoId === partido.equipoVisitanteId) {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: { golesVisitante: { increment: 1 } },
+        });
+      }
+    }
+
+    this.logger.log(`Evento ${dto.tipo} añadido al partido ${partidoId}`);
+    return evento;
+  }
+
+  async deleteEvent(partidoId: string, eventId: string, userId: string) {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+    });
+    if (!partido) throw new NotFoundException('Partido no encontrado');
+    await this.checkOrganizadorOStaff(partido.torneoId, userId);
+
+    const evento = await this.prisma.eventoPartido.findUnique({
+      where: { id: eventId },
+    });
+    if (!evento) throw new NotFoundException('Evento no encontrado');
+
+    await this.prisma.eventoPartido.delete({ where: { id: eventId } });
+
+    // Revertir gol si fue GOL
+    if (evento.tipo === TipoEvento.GOL) {
+      if (evento.equipoId === partido.equipoLocalId) {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: { golesLocal: { decrement: 1 } },
+        });
+      } else if (evento.equipoId === partido.equipoVisitanteId) {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: { golesVisitante: { decrement: 1 } },
+        });
+      }
+    }
+
+    this.logger.log(`Evento ${eventId} eliminado del partido ${partidoId}`);
+    return { mensaje: 'Evento eliminado' };
   }
 }
