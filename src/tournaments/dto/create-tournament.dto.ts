@@ -12,7 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { FormatoTorneo } from '@prisma/client';
+import { FormatoTorneo, ModalidadFutbol } from '@prisma/client';
 
 export class CampoJuegoDto {
   @ApiProperty({ example: 'Cancha Central' })
@@ -40,11 +40,23 @@ export class CreateTournamentDto {
   @IsEnum(['LIGA', 'COPA'], { message: 'El formato debe ser LIGA o COPA' })
   formato!: FormatoTorneo;
 
+  @ApiProperty({ enum: ['FUTBOL_5', 'FUTBOL_7', 'FUTBOL_11'], example: 'FUTBOL_11', required: false })
+  @IsOptional()
+  @IsEnum(['FUTBOL_5', 'FUTBOL_7', 'FUTBOL_11'], { message: 'La modalidad debe ser FUTBOL_5, FUTBOL_7 o FUTBOL_11' })
+  modalidad?: ModalidadFutbol;
+
   @ApiProperty({ example: 8, minimum: 2, maximum: 32 })
   @IsInt()
   @Min(2, { message: 'Debe haber al menos 2 equipos' })
   @Max(32, { message: 'No puede haber más de 32 equipos' })
   maxEquipos!: number;
+
+  @ApiProperty({ example: 22, minimum: 1, maximum: 30, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(1, { message: 'Debe haber al menos 1 jugador por equipo' })
+  @Max(30, { message: 'No puede haber más de 30 jugadores por equipo' })
+  maxJugadoresPorEquipo?: number;
 
   @ApiProperty({ example: '2026-04-15' })
   @IsDateString()
