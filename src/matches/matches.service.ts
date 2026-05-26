@@ -250,7 +250,10 @@ export class MatchesService {
         data.estado = EstadoPartido.EN_CURSO;
       } else {
         data.faseJuego = FaseJuego.FINALIZADO;
-        data.estado = EstadoPartido.EN_DISPUTA;
+        data.estado =
+          partido.torneo.formato === FormatoTorneo.LIGA
+            ? EstadoPartido.CONFIRMADO
+            : EstadoPartido.EN_DISPUTA;
         if (dto.golesPenalesLocal !== undefined) {
           data.golesPenalesLocal = dto.golesPenalesLocal;
         }
