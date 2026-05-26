@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsOptional, IsInt } from 'class-validator';
 
 export enum MatchControlAction {
   START_FIRST_HALF = 'START_FIRST_HALF',
@@ -12,4 +12,14 @@ export class MatchControlDto {
   @ApiProperty({ enum: MatchControlAction })
   @IsEnum(MatchControlAction)
   action: MatchControlAction;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesPenalesLocal?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesPenalesVisitante?: number;
 }

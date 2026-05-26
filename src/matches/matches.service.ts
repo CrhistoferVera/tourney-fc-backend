@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateMatchDto } from './dto/update-match.dto';
 import { MatchControlDto, MatchControlAction } from './dto/match-control.dto';
 import { MatchEventDto } from './dto/match-event.dto';
-import { EstadoPartido, RolTorneo, FaseJuego, TipoEvento } from '@prisma/client';
+import { EstadoPartido, RolTorneo, FaseJuego, TipoEvento, FormatoTorneo } from '@prisma/client';
 
 @Injectable()
 export class MatchesService {
@@ -193,6 +193,7 @@ export class MatchesService {
   async controlLiveMatch(partidoId: string, userId: string, dto: MatchControlDto) {
     const partido = await this.prisma.partido.findUnique({
       where: { id: partidoId },
+      include: { torneo: true },
     });
     if (!partido) throw new NotFoundException('Partido no encontrado');
     await this.checkOrganizadorOStaff(partido.torneoId, userId);
@@ -219,15 +220,27 @@ export class MatchesService {
     } else if (dto.action === MatchControlAction.START_SECOND_HALF) {
       data.faseJuego = FaseJuego.SEGUNDO_TIEMPO;
       data.cronometroIniciadoEn = now;
+      
+      // Reiniciar minutosJugados al límite reglamentario del primer tiempo
+      let limit = 15; // default FUTBOL_5
+      if (partido.torneo.modalidad === 'FUTBOL_7') limit = 25;
+      if (partido.torneo.modalidad === 'FUTBOL_11') limit = 45;
+      data.minutosJugados = limit;
     } else if (dto.action === MatchControlAction.END_MATCH) {
       data.faseJuego = FaseJuego.FINALIZADO;
-      data.estado = EstadoPartido.EN_DISPUTA; // O FINALIZADO, si prefieres. Actualmente la App no tiene FINALIZADO, usa EN_DISPUTA o espera confirmación. 
+      data.estado = EstadoPartido.EN_DISPUTA;
       // Calculamos tiempo total
       if (partido.cronometroIniciadoEn) {
         const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
         data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
       }
       data.cronometroIniciadoEn = null;
+      if (dto.golesPenalesLocal !== undefined) {
+        data.golesPenalesLocal = dto.golesPenalesLocal;
+      }
+      if (dto.golesPenalesVisitante !== undefined) {
+        data.golesPenalesVisitante = dto.golesPenalesVisitante;
+      }
     }
 
     const updated = await this.prisma.partido.update({
@@ -236,6 +249,108 @@ export class MatchesService {
     });
 
     this.logger.log(`Partido ${partidoId} cambió de fase a ${updated.faseJuego}`);
+
+    // Auto-advancement in Cup brackets if match ended
+    if (dto.action === MatchControlAction.END_MATCH) {
+      try {
+        const torneo = partido.torneo;
+        if (torneo && (torneo.formato === FormatoTorneo.COPA || torneo.formato === FormatoTorneo.ELIMINATORIA)) {
+          const currentRonda = partido.ronda || 1;
+          const matchesInRound = await this.prisma.partido.findMany({
+            where: { torneoId: partido.torneoId, ronda: currentRonda },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          const mIndex = matchesInRound.findIndex((m) => m.id === partidoId);
+          if (mIndex !== -1) {
+            const isEven = mIndex % 2 === 0;
+            const partnerIndex = isEven ? mIndex + 1 : mIndex - 1;
+            const partnerMatch = matchesInRound[partnerIndex];
+
+            const currentGolesLocal = updated.golesLocal ?? 0;
+            const currentGolesVisitante = updated.golesVisitante ?? 0;
+            let currentWinnerId: string;
+            if (currentGolesLocal > currentGolesVisitante) {
+              currentWinnerId = updated.equipoLocalId;
+            } else if (currentGolesVisitante > currentGolesLocal) {
+              currentWinnerId = updated.equipoVisitanteId;
+            } else {
+              // Empate en copa: decidir por penales
+              const penLocal = updated.golesPenalesLocal ?? 0;
+              const penVis = updated.golesPenalesVisitante ?? 0;
+              currentWinnerId = penLocal >= penVis ? updated.equipoLocalId : updated.equipoVisitanteId;
+            }
+
+            if (partnerMatch) {
+              const partnerFinalized = partnerMatch.faseJuego === FaseJuego.FINALIZADO;
+              if (partnerFinalized) {
+                const partnerGolesLocal = partnerMatch.golesLocal ?? 0;
+                const partnerGolesVisitante = partnerMatch.golesVisitante ?? 0;
+                let partnerWinnerId: string;
+                if (partnerGolesLocal > partnerGolesVisitante) {
+                  partnerWinnerId = partnerMatch.equipoLocalId;
+                } else if (partnerGolesVisitante > partnerGolesLocal) {
+                  partnerWinnerId = partnerMatch.equipoVisitanteId;
+                } else {
+                  // Empate en copa: decidir por penales
+                  const penLocal = partnerMatch.golesPenalesLocal ?? 0;
+                  const penVis = partnerMatch.golesPenalesVisitante ?? 0;
+                  partnerWinnerId = penLocal >= penVis ? partnerMatch.equipoLocalId : partnerMatch.equipoVisitanteId;
+                }
+
+                const nextRound = currentRonda + 1;
+                const nextMatchIndex = Math.floor(mIndex / 2);
+
+                const matchesInNextRound = await this.prisma.partido.findMany({
+                  where: { torneoId: partido.torneoId, ronda: nextRound },
+                  orderBy: { createdAt: 'asc' },
+                });
+
+                const localWinnerId = isEven ? currentWinnerId : partnerWinnerId;
+                const visitanteWinnerId = isEven ? partnerWinnerId : currentWinnerId;
+
+                const nextRoundTeamsCount = matchesInRound.length;
+                const nextFaseLabel = nextRoundTeamsCount === 2 
+                  ? 'Final' 
+                  : nextRoundTeamsCount === 4 
+                    ? 'Semifinal' 
+                    : nextRoundTeamsCount === 8
+                      ? 'Cuartos de final'
+                      : `Ronda de ${nextRoundTeamsCount}`;
+
+                if (matchesInNextRound.length > nextMatchIndex) {
+                  const existingNextMatch = matchesInNextRound[nextMatchIndex];
+                  await this.prisma.partido.update({
+                    where: { id: existingNextMatch.id },
+                    data: {
+                      equipoLocalId: localWinnerId,
+                      equipoVisitanteId: visitanteWinnerId,
+                    },
+                  });
+                  this.logger.log(`Partido de siguiente ronda actualizado: ${existingNextMatch.id} (${localWinnerId} vs ${visitanteWinnerId})`);
+                } else {
+                  const newMatch = await this.prisma.partido.create({
+                    data: {
+                      torneoId: partido.torneoId,
+                      ronda: nextRound,
+                      fase: nextFaseLabel,
+                      equipoLocalId: localWinnerId,
+                      equipoVisitanteId: visitanteWinnerId,
+                      estado: EstadoPartido.PENDIENTE,
+                      faseJuego: FaseJuego.PREVIA,
+                    },
+                  });
+                  this.logger.log(`Creado partido de siguiente ronda: ${newMatch.id} (${localWinnerId} vs ${visitanteWinnerId})`);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        this.logger.error(`Error al avanzar ganador en copa: ${err.message}`);
+      }
+    }
+
     return updated;
   }
 
