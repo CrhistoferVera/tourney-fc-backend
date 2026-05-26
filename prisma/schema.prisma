@@ -289,6 +289,8 @@ model Partido {
 
   golesLocal       Int?
   golesVisitante   Int?
+  golesPenalesLocal     Int?
+  golesPenalesVisitante Int?
 
   confirmadoPorLocal      Boolean @default(false)
   confirmadoPorVisitante  Boolean @default(false)
