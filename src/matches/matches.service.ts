@@ -226,20 +226,37 @@ export class MatchesService {
       if (partido.torneo.modalidad === 'FUTBOL_7') limit = 25;
       if (partido.torneo.modalidad === 'FUTBOL_11') limit = 45;
       data.minutosJugados = limit;
+    } else if (dto.action === MatchControlAction.START_PENALTIES) {
+      data.faseJuego = FaseJuego.PENALES;
+      data.cronometroIniciadoEn = null;
+      if (partido.golesPenalesLocal === null) data.golesPenalesLocal = 0;
+      if (partido.golesPenalesVisitante === null) data.golesPenalesVisitante = 0;
     } else if (dto.action === MatchControlAction.END_MATCH) {
-      data.faseJuego = FaseJuego.FINALIZADO;
-      data.estado = EstadoPartido.EN_DISPUTA;
-      // Calculamos tiempo total
+      const isCopa = partido.torneo.formato === FormatoTorneo.COPA || partido.torneo.formato === FormatoTorneo.ELIMINATORIA;
+      const currentGolesLocal = partido.golesLocal ?? 0;
+      const currentGolesVisitante = partido.golesVisitante ?? 0;
+      const isEmpate = currentGolesLocal === currentGolesVisitante;
+
+      // Calculamos tiempo total si el cronómetro estaba iniciado
       if (partido.cronometroIniciadoEn) {
         const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
         data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
       }
       data.cronometroIniciadoEn = null;
-      if (dto.golesPenalesLocal !== undefined) {
-        data.golesPenalesLocal = dto.golesPenalesLocal;
-      }
-      if (dto.golesPenalesVisitante !== undefined) {
-        data.golesPenalesVisitante = dto.golesPenalesVisitante;
+
+      if (isCopa && isEmpate && partido.faseJuego === FaseJuego.SEGUNDO_TIEMPO) {
+        // Empate en tiempo regular en torneo Copa: no finaliza el partido, se pausa en SEGUNDO_TIEMPO esperando penales
+        data.faseJuego = FaseJuego.SEGUNDO_TIEMPO;
+        data.estado = EstadoPartido.EN_CURSO;
+      } else {
+        data.faseJuego = FaseJuego.FINALIZADO;
+        data.estado = EstadoPartido.EN_DISPUTA;
+        if (dto.golesPenalesLocal !== undefined) {
+          data.golesPenalesLocal = dto.golesPenalesLocal;
+        }
+        if (dto.golesPenalesVisitante !== undefined) {
+          data.golesPenalesVisitante = dto.golesPenalesVisitante;
+        }
       }
     }
 
@@ -378,15 +395,20 @@ export class MatchesService {
 
     // Actualizar goles si es GOL
     if (dto.tipo === TipoEvento.GOL) {
+      const isPenal = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL';
       if (dto.equipoId === partido.equipoLocalId) {
         await this.prisma.partido.update({
           where: { id: partidoId },
-          data: { golesLocal: { increment: 1 } },
+          data: isPenal
+            ? { golesPenalesLocal: { increment: 1 } }
+            : { golesLocal: { increment: 1 } },
         });
       } else if (dto.equipoId === partido.equipoVisitanteId) {
         await this.prisma.partido.update({
           where: { id: partidoId },
-          data: { golesVisitante: { increment: 1 } },
+          data: isPenal
+            ? { golesPenalesVisitante: { increment: 1 } }
+            : { golesVisitante: { increment: 1 } },
         });
       }
     }
@@ -411,15 +433,20 @@ export class MatchesService {
 
     // Revertir gol si fue GOL
     if (evento.tipo === TipoEvento.GOL) {
+      const isPenal = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL';
       if (evento.equipoId === partido.equipoLocalId) {
         await this.prisma.partido.update({
           where: { id: partidoId },
-          data: { golesLocal: { decrement: 1 } },
+          data: isPenal
+            ? { golesPenalesLocal: { decrement: 1 } }
+            : { golesLocal: { decrement: 1 } },
         });
       } else if (evento.equipoId === partido.equipoVisitanteId) {
         await this.prisma.partido.update({
           where: { id: partidoId },
-          data: { golesVisitante: { decrement: 1 } },
+          data: isPenal
+            ? { golesPenalesVisitante: { decrement: 1 } }
+            : { golesVisitante: { decrement: 1 } },
         });
       }
     }
