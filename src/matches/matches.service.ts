@@ -391,6 +391,18 @@ export class MatchesService {
       }
     }
 
+    if (dto.tipo === TipoEvento.GOL && dto.asistenciaJugadorId) {
+      await this.prisma.eventoPartido.create({
+        data: {
+          partidoId,
+          tipo: TipoEvento.ASISTENCIA,
+          equipoId: dto.equipoId,
+          jugadorId: dto.asistenciaJugadorId,
+          minuto: dto.minuto,
+        },
+      });
+    }
+
     this.logger.log(`Evento ${dto.tipo} añadido al partido ${partidoId}`);
     return evento;
   }

@@ -27,4 +27,9 @@ export class MatchEventDto {
   @IsOptional()
   @IsString()
   detalle?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  asistenciaJugadorId?: string;
 }
