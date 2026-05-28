@@ -20,5 +20,12 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
   },
-  
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "prisma/seed*.ts",
+    "seed-*.ts",
+    "list-tournaments.ts"
+  ]
 }

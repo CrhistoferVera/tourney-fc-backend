@@ -22,7 +22,9 @@
     "seed:copa": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-copa.ts",
     "seed:demo": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-liga-demo.ts",
     "seed:demo-copa": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-copa-demo.ts",
-    "seed:clean": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-clean.ts"
+    "seed:clean": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-clean.ts",
+    "seed:team": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-team.ts",
+    "seed:liga4": "ts-node --compiler-options \"{\\\"module\\\":\\\"CommonJS\\\"}\" prisma/seed-liga-4.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

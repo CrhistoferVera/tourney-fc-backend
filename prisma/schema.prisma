@@ -113,6 +113,8 @@ model Usuario {
   // Relaciones
   roles                 UsuarioTorneo[]
   equipos               UsuarioEquipo[]
+  equiposCapitan        Equipo[]              @relation("EquipoCapitan")
+  rosterInscripciones   InscripcionRoster[]
   eventosPartido        EventoPartido[]
   notificaciones        Notificacion[]
   enlacesInvitacion     EnlaceInvitacion[]
@@ -145,11 +147,9 @@ model Torneo {
   // Relaciones
   campos            CampoJuego[]
   participantes     UsuarioTorneo[]
-  equipos           Equipo[]
   inscripciones     Inscripcion[]
   partidos          Partido[]
   notificaciones    Notificacion[]
-  enlacesInvitacion EnlaceInvitacion[]
   invitaciones      InvitacionPendiente[]
 
   @@map("torneos")
@@ -191,21 +191,23 @@ model CampoJuego {
 }
 
 // ─────────────────────────────────────────
-// EQUIPO
+// EQUIPO (global, independiente de torneos)
 // ─────────────────────────────────────────
 
 model Equipo {
-  id        String   @id @default(uuid())
-  torneoId  String
-  nombre    String
-  escudo    String?
-  telefonoCapitan String?
+  id                String   @id @default(uuid())
+  nombre            String
+  escudo            String?
+  telefonoCapitan   String?
   cantidadJugadores Int?
-  createdAt DateTime @default(now())
+  capitanId         String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  torneo            Torneo                @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  capitan           Usuario               @relation("EquipoCapitan", fields: [capitanId], references: [id])
   jugadores         UsuarioEquipo[]
-  inscripcion       Inscripcion?
+  inscripciones     Inscripcion[]
+  enlaceInvitacion  EnlaceInvitacion?
   partidosLocal     Partido[]             @relation("EquipoLocal")
   partidosVisitante Partido[]             @relation("EquipoVisitante")
   invitaciones      InvitacionPendiente[]
@@ -232,30 +234,49 @@ model UsuarioEquipo {
 }
 
 // ─────────────────────────────────────────
-// INSCRIPCION
+// INSCRIPCION (equipo ↔ torneo, N-N)
 // ─────────────────────────────────────────
 
 model Inscripcion {
   id        String            @id @default(uuid())
   torneoId  String
-  equipoId  String            @unique
+  equipoId  String
   estado    EstadoInscripcion @default(PENDIENTE)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
-  torneo    Torneo            @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  equipo    Equipo            @relation(fields: [equipoId], references: [id])
+  torneo    Torneo              @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  equipo    Equipo              @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  roster    InscripcionRoster[]
 
+  @@unique([torneoId, equipoId])
   @@map("inscripciones")
 }
 
 // ─────────────────────────────────────────
-// ENLACE DE INVITACION
+// ROSTER DE INSCRIPCION (subset jugadores)
+// ─────────────────────────────────────────
+
+model InscripcionRoster {
+  id            String   @id @default(uuid())
+  inscripcionId String
+  usuarioId     String
+  createdAt     DateTime @default(now())
+
+  inscripcion   Inscripcion @relation(fields: [inscripcionId], references: [id], onDelete: Cascade)
+  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
+
+  @@unique([inscripcionId, usuarioId])
+  @@map("inscripcion_roster")
+}
+
+// ─────────────────────────────────────────
+// ENLACE DE INVITACION (a equipo)
 // ─────────────────────────────────────────
 
 model EnlaceInvitacion {
   id         String    @id @default(uuid())
-  torneoId   String
+  equipoId   String    @unique
   creadoPor  String
   codigo     String    @unique @default(uuid())
   usos       Int       @default(0)
@@ -263,7 +284,7 @@ model EnlaceInvitacion {
   expiresAt  DateTime?
   createdAt  DateTime  @default(now())
 
-  torneo     Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  equipo     Equipo    @relation(fields: [equipoId], references: [id], onDelete: Cascade)
   usuario    Usuario   @relation(fields: [creadoPor], references: [id])
 
   @@map("enlaces_invitacion")
@@ -361,9 +382,13 @@ model ResetPassword {
   @@map("reset_password")
 }
 
+// ─────────────────────────────────────────
+// INVITACION PENDIENTE (a torneo como staff, o a equipo como jugador)
+// ─────────────────────────────────────────
+
 model InvitacionPendiente {
   id          String           @id @default(uuid())
-  torneoId    String
+  torneoId    String?
   equipoId    String?
   tipo        TipoInvitacion
   estado      EstadoInvitacion @default(PENDIENTE)
@@ -372,11 +397,13 @@ model InvitacionPendiente {
   usuarioId   String?
   createdAt   DateTime         @default(now())
 
-  torneo      Torneo           @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  equipo      Equipo?          @relation(fields: [equipoId], references: [id])
+  torneo      Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  equipo      Equipo?          @relation(fields: [equipoId], references: [id], onDelete: Cascade)
   invitador   Usuario          @relation("Invitador", fields: [invitadoPor], references: [id])
   usuario     Usuario?         @relation("Invitado", fields: [usuarioId], references: [id])
 
-  @@unique([torneoId, email, tipo])
+  @@index([email, estado])
+  @@index([equipoId, email, estado])
+  @@index([torneoId, email, tipo])
   @@map("invitaciones_pendientes")
 }

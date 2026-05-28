@@ -8,13 +8,18 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
+import { CreateInviteLinkDto } from './dto/invite-link.dto';
 import {
-  RolTorneo,
-  TipoInvitacion,
   EstadoInvitacion,
+  EstadoTorneo,
   TipoEvento,
+  TipoInvitacion,
 } from '@prisma/client';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+
+const DEFAULT_INVITE_LINK_DAYS = 7;
+const INVITE_LINK_BASE_URL =
+  process.env.INVITE_LINK_BASE_URL ?? 'https://tourneyfc.app/join';
 
 @Injectable()
 export class TeamsService {
@@ -25,179 +30,54 @@ export class TeamsService {
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
+  // ─── Escudo upload ─────────────────────────────────────────────────────────
+
   async uploadEscudo(file: Express.Multer.File) {
     const result = await this.cloudinaryService.uploadStream(file.buffer, 'escudos');
     return { url: result.secure_url };
   }
 
-  async create(torneoId: string, userId: string, dto: CreateTeamDto) {
-    const torneo = await this.prisma.torneo.findUnique({
-      where: { id: torneoId },
-    });
-    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+  // ─── Equipo global: CRUD ───────────────────────────────────────────────────
 
-    if (torneo.estado !== 'EN_INSCRIPCION') {
-      throw new BadRequestException(
-        'Solo se pueden inscribir equipos cuando el torneo está en período de inscripción',
-      );
-    }
-
-    // Verificar si el usuario ya tiene equipo en este torneo
-    const inscripcionActiva = await this.prisma.inscripcion.findFirst({
-      where: {
-        torneoId,
-        estado: { in: ['PENDIENTE', 'APROBADA'] },
-        equipo: {
-          jugadores: { some: { usuarioId: userId } },
-        },
-      },
-    });
-    if (inscripcionActiva) {
-      throw new BadRequestException(
-        'Ya tienes una solicitud activa en este torneo',
-      );
-    }
-
-    // Verificar cupo
-    const totalAprobados = await this.prisma.inscripcion.count({
-      where: { torneoId, estado: 'APROBADA' },
-    });
-    if (totalAprobados >= torneo.maxEquipos) {
-      throw new BadRequestException(
-        'El torneo ya alcanzó el cupo máximo de equipos',
-      );
-    }
-
+  async createGlobal(userId: string, dto: CreateTeamDto) {
     const equipo = await this.prisma.equipo.create({
       data: {
-        torneoId,
         nombre: dto.nombre,
         escudo: dto.escudo,
         telefonoCapitan: dto.telefonoCapitan,
-        cantidadJugadores: dto.cantidadJugadores,
-      },
-    });
-
-    await this.prisma.usuarioEquipo.create({
-      data: { usuarioId: userId, equipoId: equipo.id },
-    });
-
-    const participacionExistente = await this.prisma.usuarioTorneo.findUnique({
-      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-    });
-
-    if (!participacionExistente) {
-      await this.prisma.usuarioTorneo.create({
-        data: { usuarioId: userId, torneoId, rol: RolTorneo.CAPITAN },
-      });
-    } else if (
-      participacionExistente.rol !== RolTorneo.ORGANIZADOR &&
-      participacionExistente.rol !== RolTorneo.STAFF
-    ) {
-      await this.prisma.usuarioTorneo.update({
-        where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-        data: { rol: RolTorneo.CAPITAN },
-      });
-    }
-
-    this.logger.log(
-      `Equipo creado: ${equipo.id} en torneo: ${torneoId} por usuario: ${userId}`,
-    );
-
-    await this.prisma.inscripcion.create({
-      data: {
-        torneoId,
-        equipoId: equipo.id,
-        estado: 'PENDIENTE',
-      },
-    });
-    return equipo;
-  }
-
-  async remove(equipoId: string, userId: string) {
-    const equipo = await this.prisma.equipo.findUnique({
-      where: { id: equipoId },
-      include: { jugadores: true },
-    });
-    if (!equipo) throw new NotFoundException('Equipo no encontrado');
-
-    const torneo = await this.prisma.torneo.findUnique({
-      where: { id: equipo.torneoId },
-    });
-    if (torneo?.estado === 'EN_CURSO' || torneo?.estado === 'FINALIZADO') {
-      throw new ForbiddenException(
-        'No se pueden eliminar equipos cuando el torneo está en curso o finalizado',
-      );
-    }
-
-    const participacion = await this.prisma.usuarioTorneo.findUnique({
-      where: {
-        usuarioId_torneoId: { usuarioId: userId, torneoId: equipo.torneoId },
-      },
-    });
-
-    const esCapitanDelEquipo =
-      participacion?.rol === RolTorneo.CAPITAN &&
-      equipo.jugadores.some((j) => j.usuarioId === userId);
-
-    const esOrganizadorOStaff =
-      participacion?.rol === RolTorneo.ORGANIZADOR ||
-      participacion?.rol === RolTorneo.STAFF;
-
-    if (!esCapitanDelEquipo && !esOrganizadorOStaff) {
-      throw new ForbiddenException(
-        'No tienes permisos para eliminar este equipo',
-      );
-    }
-    const jugadoresIds = equipo.jugadores.map((j) => j.usuarioId);
-    await this.prisma.usuarioTorneo.deleteMany({
-      where: {
-        torneoId: equipo.torneoId,
-        usuarioId: { in: jugadoresIds },
-        rol: RolTorneo.CAPITAN,
-      },
-    });
-    await this.prisma.usuarioEquipo.deleteMany({ where: { equipoId } });
-    await this.prisma.inscripcion.deleteMany({ where: { equipoId } });
-    await this.prisma.equipo.delete({ where: { id: equipoId } });
-    this.logger.log(`Equipo eliminado: ${equipoId}`);
-    return { mensaje: 'Equipo eliminado exitosamente' };
-  }
-
-  // Listar equipos de un torneo
-  async findAll(torneoId: string) {
-    const equipos = await this.prisma.equipo.findMany({
-      where: { torneoId, inscripcion: { estado: 'APROBADA' } },
-      include: {
+        capitanId: userId,
         jugadores: {
-          include: {
-            usuario: {
-              select: { id: true, nombre: true, fotoPerfil: true },
-            },
-          },
+          create: { usuarioId: userId },
         },
-        _count: { select: { jugadores: true } },
       },
-      orderBy: { createdAt: 'asc' },
+    });
+    this.logger.log(`Equipo global creado: ${equipo.id} por capitán ${userId}`);
+    return this.buildMyTeam(equipo.id);
+  }
+
+  async getMyTeams(userId: string) {
+    const equipos = await this.prisma.equipo.findMany({
+      where: { jugadores: { some: { usuarioId: userId } } },
+      include: { _count: { select: { jugadores: true } } },
+      orderBy: { createdAt: 'desc' },
     });
 
     return equipos.map((e) => ({
       id: e.id,
       nombre: e.nombre,
       escudo: e.escudo,
-      telefonoCapitan: e.telefonoCapitan,
-      cantidadJugadores: e.cantidadJugadores ?? e._count.jugadores,
-      jugadores: e.jugadores.map((j) => ({
-        id: j.usuario.id,
-        nombre: j.usuario.nombre,
-        fotoPerfil: j.usuario.fotoPerfil,
-      })),
-      createdAt: e.createdAt,
+      capitanId: e.capitanId,
+      cantidadJugadores: e._count.jugadores,
+      esCapitan: e.capitanId === userId,
     }));
   }
 
-  // Detalle de un equipo
-  async findOne(equipoId: string) {
+  // Detalle global de un equipo (sin contexto de torneo)
+  async findOne(equipoId: string, userId?: string) {
+    return this.buildMyTeam(equipoId, userId);
+  }
+
+  private async buildMyTeam(equipoId: string, viewerId?: string) {
     const equipo = await this.prisma.equipo.findUnique({
       where: { id: equipoId },
       include: {
@@ -209,27 +89,26 @@ export class TeamsService {
           },
           orderBy: { createdAt: 'asc' },
         },
-        torneo: { select: { id: true, nombre: true } },
+        invitaciones: {
+          where: { tipo: TipoInvitacion.JUGADOR, estado: EstadoInvitacion.PENDIENTE },
+          select: { id: true, email: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        enlaceInvitacion: true,
       },
     });
 
     if (!equipo) throw new NotFoundException('Equipo no encontrado');
 
-    const jugadorIds = equipo.jugadores.map((j) => j.usuarioId);
-    const capitan = await this.prisma.usuarioTorneo.findFirst({
-      where: {
-        torneoId: equipo.torneoId,
-        usuarioId: { in: jugadorIds },
-        rol: RolTorneo.CAPITAN,
-      },
-      select: { usuarioId: true },
-    });
-
-    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
-      equipo.torneoId,
-      equipoId,
-      jugadorIds,
-    );
+    const isCapitan = viewerId !== undefined && equipo.capitanId === viewerId;
+    const inviteLink =
+      isCapitan && equipo.enlaceInvitacion
+        ? {
+            code: equipo.enlaceInvitacion.codigo,
+            url: `${INVITE_LINK_BASE_URL}/${equipo.enlaceInvitacion.codigo}`,
+            expiresAt: equipo.enlaceInvitacion.expiresAt,
+          }
+        : null;
 
     return {
       id: equipo.id,
@@ -237,22 +116,384 @@ export class TeamsService {
       escudo: equipo.escudo,
       telefonoCapitan: equipo.telefonoCapitan,
       cantidadJugadores: equipo.cantidadJugadores ?? equipo.jugadores.length,
+      capitanId: equipo.capitanId,
       jugadores: equipo.jugadores.map((j) => ({
-        id: j.usuario.id,
-        nombre: j.usuario.nombre,
-        fotoPerfil: j.usuario.fotoPerfil,
-        email: j.usuario.email,
-        estadisticas: estadisticasPorJugador.get(j.usuario.id) ?? {
-          goles: 0,
-          asistencias: 0,
-          tarjetasAmarillas: 0,
-          tarjetasRojas: 0,
+        id: j.id,
+        usuarioId: j.usuarioId,
+        equipoId: j.equipoId,
+        createdAt: j.createdAt,
+        usuario: j.usuario,
+      })),
+      invitaciones: equipo.invitaciones,
+      inviteLink,
+    };
+  }
+
+  async update(equipoId: string, userId: string, dto: UpdateTeamDto) {
+    const equipo = await this.requireCapitan(equipoId, userId);
+    await this.prisma.equipo.update({
+      where: { id: equipo.id },
+      data: {
+        nombre: dto.nombre,
+        escudo: dto.escudo,
+        telefonoCapitan: dto.telefonoCapitan,
+      },
+    });
+    this.logger.log(`Equipo actualizado: ${equipo.id}`);
+    return this.buildMyTeam(equipo.id, userId);
+  }
+
+  async remove(equipoId: string, userId: string) {
+    const equipo = await this.requireCapitan(equipoId, userId);
+
+    const bloqueante = await this.prisma.inscripcion.findFirst({
+      where: {
+        equipoId: equipo.id,
+        estado: 'APROBADA',
+        torneo: { estado: { in: [EstadoTorneo.EN_CURSO, EstadoTorneo.FINALIZADO] } },
+      },
+    });
+    if (bloqueante) {
+      throw new BadRequestException(
+        'No puedes eliminar el equipo: tiene inscripción aprobada en un torneo en curso o finalizado.',
+      );
+    }
+
+    await this.prisma.equipo.delete({ where: { id: equipo.id } });
+    this.logger.log(`Equipo eliminado: ${equipo.id}`);
+    return { mensaje: 'Equipo eliminado exitosamente' };
+  }
+
+  async leaveTeam(equipoId: string, userId: string) {
+    const equipo = await this.prisma.equipo.findUnique({ where: { id: equipoId } });
+    if (!equipo) throw new NotFoundException('Equipo no encontrado');
+    if (equipo.capitanId === userId) {
+      throw new BadRequestException(
+        'El capitán no puede salir del equipo. Transfiere la capitanía o elimina el equipo.',
+      );
+    }
+
+    const miembro = await this.prisma.usuarioEquipo.findUnique({
+      where: { usuarioId_equipoId: { usuarioId: userId, equipoId } },
+    });
+    if (!miembro) throw new NotFoundException('No formas parte de este equipo');
+
+    const enRosterActivo = await this.prisma.inscripcionRoster.findFirst({
+      where: {
+        usuarioId: userId,
+        inscripcion: {
+          equipoId,
+          estado: 'APROBADA',
+          torneo: { estado: EstadoTorneo.EN_CURSO },
+        },
+      },
+    });
+    if (enRosterActivo) {
+      throw new BadRequestException(
+        'No puedes salir: estás en el roster de un torneo en curso.',
+      );
+    }
+
+    await this.prisma.usuarioEquipo.delete({ where: { id: miembro.id } });
+    this.logger.log(`Usuario ${userId} salió del equipo ${equipoId}`);
+    return { mensaje: 'Has salido del equipo' };
+  }
+
+  // ─── Invitación por correo ─────────────────────────────────────────────────
+
+  async invitePlayer(equipoId: string, userId: string, email: string) {
+    const equipo = await this.requireCapitan(equipoId, userId);
+
+    const invitado = await this.prisma.usuario.findUnique({ where: { email } });
+    if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
+    if (invitado.id === userId) throw new BadRequestException('No puedes invitarte a ti mismo');
+
+    const yaEnEquipo = await this.prisma.usuarioEquipo.findUnique({
+      where: { usuarioId_equipoId: { usuarioId: invitado.id, equipoId: equipo.id } },
+    });
+    if (yaEnEquipo) throw new BadRequestException('Este usuario ya es miembro de tu equipo');
+
+    const yaInvitado = await this.prisma.invitacionPendiente.findFirst({
+      where: {
+        equipoId: equipo.id,
+        email,
+        tipo: TipoInvitacion.JUGADOR,
+        estado: EstadoInvitacion.PENDIENTE,
+      },
+    });
+    if (yaInvitado) {
+      throw new BadRequestException('Ya hay una invitación pendiente para este correo.');
+    }
+
+    await this.prisma.invitacionPendiente.create({
+      data: {
+        torneoId: null,
+        equipoId: equipo.id,
+        email,
+        tipo: TipoInvitacion.JUGADOR,
+        estado: EstadoInvitacion.PENDIENTE,
+        invitadoPor: userId,
+        usuarioId: invitado.id,
+      },
+    });
+
+    this.logger.log(`Capitán ${userId} invitó a ${email} al equipo ${equipo.id}`);
+    return { mensaje: 'Jugador invitado correctamente' };
+  }
+
+  // ─── Enlace de invitación ──────────────────────────────────────────────────
+
+  async createInviteLink(
+    equipoId: string,
+    userId: string,
+    dto: CreateInviteLinkDto,
+  ) {
+    const equipo = await this.requireCapitan(equipoId, userId);
+
+    const dias = dto.expiraEnDias ?? DEFAULT_INVITE_LINK_DAYS;
+    const expiresAt = dias > 0 ? new Date(Date.now() + dias * 86_400_000) : null;
+
+    const link = await this.prisma.enlaceInvitacion.upsert({
+      where: { equipoId: equipo.id },
+      update: { expiresAt, usos: 0 },
+      create: {
+        equipoId: equipo.id,
+        creadoPor: userId,
+        expiresAt,
+      },
+    });
+
+    return {
+      code: link.codigo,
+      url: `${INVITE_LINK_BASE_URL}/${link.codigo}`,
+      expiresAt: link.expiresAt,
+    };
+  }
+
+  async revokeInviteLink(equipoId: string, userId: string) {
+    await this.requireCapitan(equipoId, userId);
+    await this.prisma.enlaceInvitacion.deleteMany({ where: { equipoId } });
+    return { mensaje: 'Enlace revocado' };
+  }
+
+  async previewInviteLink(code: string, viewerId?: string) {
+    const link = await this.prisma.enlaceInvitacion.findUnique({
+      where: { codigo: code },
+      include: {
+        equipo: {
+          include: {
+            capitan: { select: { nombre: true } },
+            _count: { select: { jugadores: true } },
+          },
+        },
+      },
+    });
+    if (!link) throw new NotFoundException('Enlace inválido o expirado');
+    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
+      throw new NotFoundException('Enlace inválido o expirado');
+    }
+
+    let yaEsMiembro = false;
+    if (viewerId) {
+      const m = await this.prisma.usuarioEquipo.findUnique({
+        where: { usuarioId_equipoId: { usuarioId: viewerId, equipoId: link.equipoId } },
+      });
+      yaEsMiembro = !!m;
+    }
+
+    return {
+      teamId: link.equipo.id,
+      nombre: link.equipo.nombre,
+      escudo: link.equipo.escudo,
+      capitanNombre: link.equipo.capitan.nombre,
+      cantidadJugadores: link.equipo._count.jugadores,
+      expiresAt: link.expiresAt,
+      yaEsMiembro,
+    };
+  }
+
+  async joinByCode(code: string, userId: string) {
+    const link = await this.prisma.enlaceInvitacion.findUnique({
+      where: { codigo: code },
+      include: { equipo: true },
+    });
+    if (!link) throw new NotFoundException('Enlace inválido o expirado');
+    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
+      throw new NotFoundException('Enlace inválido o expirado');
+    }
+
+    const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
+      where: { usuarioId_equipoId: { usuarioId: userId, equipoId: link.equipoId } },
+    });
+    if (yaEsMiembro) {
+      throw new BadRequestException('Ya formas parte de este equipo');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.usuarioEquipo.create({
+        data: { usuarioId: userId, equipoId: link.equipoId },
+      }),
+      this.prisma.enlaceInvitacion.update({
+        where: { id: link.id },
+        data: { usos: { increment: 1 } },
+      }),
+    ]);
+
+    this.logger.log(`Usuario ${userId} se unió al equipo ${link.equipoId} via enlace`);
+    return { teamId: link.equipoId, nombre: link.equipo.nombre };
+  }
+
+  // Detalle de un equipo en el contexto de un torneo (roster + stats)
+  async findOneInTournament(equipoId: string, torneoId: string) {
+    const inscripcion = await this.prisma.inscripcion.findUnique({
+      where: { torneoId_equipoId: { torneoId, equipoId } },
+      include: {
+        equipo: true,
+        roster: {
+          include: {
+            usuario: {
+              select: { id: true, nombre: true, fotoPerfil: true, email: true },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!inscripcion) throw new NotFoundException('Equipo no encontrado en este torneo');
+
+    const jugadorIds = inscripcion.roster.map((r) => r.usuarioId);
+    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
+      torneoId,
+      equipoId,
+      jugadorIds,
+    );
+
+    return {
+      id: inscripcion.equipo.id,
+      nombre: inscripcion.equipo.nombre,
+      escudo: inscripcion.equipo.escudo,
+      telefonoCapitan: inscripcion.equipo.telefonoCapitan,
+      cantidadJugadores: inscripcion.roster.length,
+      capitanId: inscripcion.equipo.capitanId,
+      jugadores: inscripcion.roster.map((r) => ({
+        id: r.id,
+        usuarioId: r.usuarioId,
+        equipoId,
+        createdAt: r.createdAt,
+        usuario: {
+          ...r.usuario,
+          estadisticas: estadisticasPorJugador.get(r.usuarioId) ?? {
+            goles: 0,
+            asistencias: 0,
+            tarjetasAmarillas: 0,
+            tarjetasRojas: 0,
+          },
         },
       })),
-      createdAt: equipo.createdAt,
-      torneo: equipo.torneo,
-      capitanId: capitan?.usuarioId ?? null,
+      invitaciones: [],
+      inviteLink: null,
     };
+  }
+
+  // ─── Vistas en contexto de torneo ──────────────────────────────────────────
+
+  async findAllByTournament(torneoId: string) {
+    const inscripciones = await this.prisma.inscripcion.findMany({
+      where: { torneoId, estado: 'APROBADA' },
+      include: {
+        equipo: true,
+        roster: {
+          include: {
+            usuario: {
+              select: { id: true, nombre: true, fotoPerfil: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return inscripciones.map((ins) => ({
+      id: ins.equipo.id,
+      nombre: ins.equipo.nombre,
+      escudo: ins.equipo.escudo,
+      telefonoCapitan: ins.equipo.telefonoCapitan,
+      cantidadJugadores: ins.roster.length,
+      jugadores: ins.roster.map((r) => ({
+        id: r.usuario.id,
+        nombre: r.usuario.nombre,
+        fotoPerfil: r.usuario.fotoPerfil,
+      })),
+      createdAt: ins.equipo.createdAt,
+    }));
+  }
+
+  async getMyTeam(torneoId: string, userId: string) {
+    const inscripcion = await this.prisma.inscripcion.findFirst({
+      where: {
+        torneoId,
+        estado: { in: ['PENDIENTE', 'APROBADA'] },
+        roster: { some: { usuarioId: userId } },
+      },
+      include: {
+        equipo: true,
+        roster: {
+          include: {
+            usuario: {
+              select: { id: true, nombre: true, fotoPerfil: true, email: true },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!inscripcion) throw new NotFoundException('No tienes un equipo en este torneo');
+
+    const jugadorIds = inscripcion.roster.map((r) => r.usuarioId);
+    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
+      torneoId,
+      inscripcion.equipoId,
+      jugadorIds,
+    );
+
+    return {
+      id: inscripcion.equipo.id,
+      nombre: inscripcion.equipo.nombre,
+      escudo: inscripcion.equipo.escudo,
+      telefonoCapitan: inscripcion.equipo.telefonoCapitan,
+      cantidadJugadores: inscripcion.roster.length,
+      capitanId: inscripcion.equipo.capitanId,
+      jugadores: inscripcion.roster.map((r) => ({
+        id: r.id,
+        usuarioId: r.usuarioId,
+        equipoId: inscripcion.equipoId,
+        createdAt: r.createdAt,
+        usuario: {
+          ...r.usuario,
+          estadisticas: estadisticasPorJugador.get(r.usuarioId) ?? {
+            goles: 0,
+            asistencias: 0,
+            tarjetasAmarillas: 0,
+            tarjetasRojas: 0,
+          },
+        },
+      })),
+      invitaciones: [],
+      inviteLink: null,
+    };
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  private async requireCapitan(equipoId: string, userId: string) {
+    const equipo = await this.prisma.equipo.findUnique({ where: { id: equipoId } });
+    if (!equipo) throw new NotFoundException('Equipo no encontrado');
+    if (equipo.capitanId !== userId) {
+      throw new ForbiddenException('Solo el capitán puede realizar esta acción');
+    }
+    return equipo;
   }
 
   private async getEstadisticasJugadoresTorneo(
@@ -267,10 +508,7 @@ export class TeamsService {
       tarjetasRojas: 0,
     });
 
-    const mapa = new Map(
-      jugadorIds.map((id) => [id, vacias()] as const),
-    );
-
+    const mapa = new Map(jugadorIds.map((id) => [id, vacias()] as const));
     if (jugadorIds.length === 0) return mapa;
 
     const eventos = await this.prisma.eventoPartido.findMany({
@@ -284,10 +522,10 @@ export class TeamsService {
             TipoEvento.TARJETA_ROJA,
           ],
         },
-        partido: {
-          torneoId,
-          OR: [{ equipoLocalId: equipoId }, { equipoVisitanteId: equipoId }],
-        },
+        OR: [
+          { partido: { torneoId, equipoLocalId: equipoId } },
+          { partido: { torneoId, equipoVisitanteId: equipoId } },
+        ],
       },
       select: { jugadorId: true, tipo: true },
     });
@@ -313,201 +551,5 @@ export class TeamsService {
     }
 
     return mapa;
-  }
-
-  // Editar equipo — solo CAPITAN u ORGANIZADOR/STAFF
-  async update(equipoId: string, userId: string, dto: UpdateTeamDto) {
-    const equipo = await this.prisma.equipo.findUnique({
-      where: { id: equipoId },
-    });
-    if (!equipo) throw new NotFoundException('Equipo no encontrado');
-
-    await this.checkCapitanOSuperior(equipo.torneoId, userId);
-
-    const updated = await this.prisma.equipo.update({
-      where: { id: equipoId },
-      data: dto,
-    });
-
-    this.logger.log(`Equipo actualizado: ${equipoId}`);
-    return updated;
-  }
-
-  // Agregar jugador al equipo mediante enlace — HU-17
-  async joinTeam(equipoId: string, userId: string) {
-    const equipo = await this.prisma.equipo.findUnique({
-      where: { id: equipoId },
-      include: { torneo: true },
-    });
-    if (!equipo) throw new NotFoundException('Equipo no encontrado');
-
-    const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
-      where: { usuarioId_equipoId: { usuarioId: userId, equipoId } },
-    });
-    if (yaEsMiembro)
-      throw new ForbiddenException('Ya eres miembro de este equipo');
-
-    await this.prisma.usuarioEquipo.create({
-      data: { usuarioId: userId, equipoId },
-    });
-
-    // Asignar rol JUGADOR en el torneo si no tiene rol
-    await this.prisma.usuarioTorneo.upsert({
-      where: {
-        usuarioId_torneoId: { usuarioId: userId, torneoId: equipo.torneoId },
-      },
-      update: {},
-      create: {
-        usuarioId: userId,
-        torneoId: equipo.torneoId,
-        rol: RolTorneo.JUGADOR,
-      },
-    });
-
-    this.logger.log(`Usuario ${userId} se unió al equipo ${equipoId}`);
-    return { mensaje: 'Te has unido al equipo exitosamente' };
-  }
-
-  // Helpers de rol
-  private async checkCapitanOSuperior(torneoId: string, userId: string) {
-    const participacion = await this.prisma.usuarioTorneo.findUnique({
-      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-    });
-    const rolesPermitidos: RolTorneo[] = [
-      RolTorneo.CAPITAN,
-      RolTorneo.ORGANIZADOR,
-      RolTorneo.STAFF,
-    ];
-    if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException(
-        'No tienes permisos para realizar esta acción',
-      );
-    }
-  }
-
-  private async checkOrganizadorOStaff(torneoId: string, userId: string) {
-    const participacion = await this.prisma.usuarioTorneo.findUnique({
-      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
-    });
-    const rolesPermitidos: RolTorneo[] = [
-      RolTorneo.ORGANIZADOR,
-      RolTorneo.STAFF,
-    ];
-    if (!participacion || !rolesPermitidos.includes(participacion.rol)) {
-      throw new ForbiddenException(
-        'Solo el organizador o staff puede realizar esta acción',
-      );
-    }
-  }
-
-  async getMyTeam(torneoId: string, userId: string) {
-    // Step 1: find all teams in this tournament the user belongs to
-    const memberships = await this.prisma.usuarioEquipo.findMany({
-      where: { usuarioId: userId, equipo: { torneoId } },
-      select: { equipoId: true },
-    });
-
-    if (memberships.length === 0) {
-      throw new NotFoundException('No tienes un equipo en este torneo');
-    }
-
-    const equipoId = memberships[0].equipoId;
-
-    const equipo = await this.prisma.equipo.findUnique({
-      where: { id: equipoId },
-      include: {
-        jugadores: {
-          include: {
-            usuario: { select: { id: true, nombre: true, fotoPerfil: true, email: true } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
-        invitaciones: {
-          where: { tipo: TipoInvitacion.JUGADOR, estado: EstadoInvitacion.PENDIENTE },
-          select: { id: true, email: true, createdAt: true },
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
-
-    if (!equipo) throw new NotFoundException('No tienes un equipo en este torneo');
-
-    // Find the captain: a team member who holds the CAPITAN role in this tournament
-    const jugadorIds = equipo.jugadores.map((j) => j.usuarioId);
-    const capitan = await this.prisma.usuarioTorneo.findFirst({
-      where: { torneoId, usuarioId: { in: jugadorIds }, rol: RolTorneo.CAPITAN },
-      select: { usuarioId: true },
-    });
-
-    const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
-      torneoId,
-      equipoId,
-      jugadorIds,
-    );
-
-    return {
-      ...equipo,
-      capitanId: capitan?.usuarioId ?? null,
-      jugadores: equipo.jugadores.map((j) => ({
-        ...j,
-        usuario: {
-          ...j.usuario,
-          estadisticas: estadisticasPorJugador.get(j.usuarioId) ?? {
-            goles: 0,
-            asistencias: 0,
-            tarjetasAmarillas: 0,
-            tarjetasRojas: 0,
-          },
-        },
-      })),
-    };
-  }
-
-  async invitePlayer(teamId: string, userId: string, email: string) {
-    const equipo = await this.prisma.equipo.findUnique({ where: { id: teamId } });
-    if (!equipo) throw new NotFoundException('Equipo no encontrado');
-
-    // Caller must be CAPITAN of this tournament
-    const esCapitan = await this.prisma.usuarioTorneo.findFirst({
-      where: { usuarioId: userId, torneoId: equipo.torneoId, rol: RolTorneo.CAPITAN },
-    });
-    if (!esCapitan) throw new ForbiddenException('Solo el capitán puede invitar jugadores');
-
-    // Caller must belong to this specific team
-    const esDeEquipo = await this.prisma.usuarioEquipo.findUnique({
-      where: { usuarioId_equipoId: { usuarioId: userId, equipoId: teamId } },
-    });
-    if (!esDeEquipo) throw new ForbiddenException('No eres miembro de este equipo');
-
-    const invitado = await this.prisma.usuario.findUnique({ where: { email } });
-    if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
-    if (invitado.id === userId) throw new BadRequestException('No puedes invitarte a ti mismo');
-
-    const yaEnEquipo = await this.prisma.usuarioEquipo.findUnique({
-      where: { usuarioId_equipoId: { usuarioId: invitado.id, equipoId: teamId } },
-    });
-    if (yaEnEquipo) throw new BadRequestException('Este usuario ya es miembro de tu equipo');
-
-    const yaEnTorneo = await this.prisma.usuarioTorneo.findUnique({
-      where: { usuarioId_torneoId: { usuarioId: invitado.id, torneoId: equipo.torneoId } },
-    });
-    if (yaEnTorneo) throw new BadRequestException('Este usuario ya participa en este torneo');
-
-    await this.prisma.invitacionPendiente.upsert({
-      where: { torneoId_email_tipo: { torneoId: equipo.torneoId, email, tipo: TipoInvitacion.JUGADOR } },
-      update: { equipoId: teamId, estado: EstadoInvitacion.PENDIENTE, invitadoPor: userId },
-      create: {
-        torneoId: equipo.torneoId,
-        equipoId: teamId,
-        email,
-        tipo: TipoInvitacion.JUGADOR,
-        estado: EstadoInvitacion.PENDIENTE,
-        invitadoPor: userId,
-        usuarioId: invitado.id,
-      },
-    });
-
-    this.logger.log(`Capitán ${userId} invitó a ${email} al equipo ${teamId}`);
-    return { mensaje: 'Jugador invitado correctamente' };
   }
 }

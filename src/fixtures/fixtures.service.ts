@@ -17,7 +17,13 @@ export class FixturesService {
   async generate(torneoId: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id: torneoId },
-      include: { equipos: true, partidos: true },
+      include: {
+        inscripciones: {
+          where: { estado: 'APROBADA' },
+          include: { equipo: { select: { id: true } } },
+        },
+        partidos: true,
+      },
     });
 
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
@@ -29,9 +35,11 @@ export class FixturesService {
       );
     }
 
-    if (torneo.equipos.length < torneo.maxEquipos) {
+    const equipos = torneo.inscripciones.map((ins) => ({ id: ins.equipo.id }));
+
+    if (equipos.length < torneo.maxEquipos) {
       throw new BadRequestException(
-        `Se necesitan ${torneo.maxEquipos} equipos para generar el fixture. Actualmente hay ${torneo.equipos.length}.`,
+        `Se necesitan ${torneo.maxEquipos} equipos para generar el fixture. Actualmente hay ${equipos.length}.`,
       );
     }
 
@@ -39,7 +47,6 @@ export class FixturesService {
       await this.prisma.partido.deleteMany({ where: { torneoId } });
     }
 
-    const equipos = torneo.equipos;
     const partidos =
       torneo.formato === FormatoTorneo.LIGA
         ? this.generarLiga(equipos)
@@ -103,11 +110,12 @@ export class FixturesService {
       );
     }
 
-    const equipos = await this.prisma.equipo.findMany({
-      where: { torneoId, inscripcion: { estado: 'APROBADA' } },
-      select: { id: true, nombre: true, escudo: true },
-      orderBy: { nombre: 'asc' },
+    const inscripciones = await this.prisma.inscripcion.findMany({
+      where: { torneoId, estado: 'APROBADA' },
+      include: { equipo: { select: { id: true, nombre: true, escudo: true } } },
+      orderBy: { equipo: { nombre: 'asc' } },
     });
+    const equipos = inscripciones.map((i) => i.equipo);
 
     type FilaTabla = {
       equipo: { id: string; nombre: string; escudo: string | null };

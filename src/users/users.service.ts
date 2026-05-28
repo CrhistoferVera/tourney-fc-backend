@@ -113,11 +113,7 @@ export class UsersService {
       include: {
         torneo: {
           include: {
-            equipos: {
-              include: {
-                jugadores: true,
-              },
-            },
+            _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
           },
         },
       },
@@ -129,7 +125,7 @@ export class UsersService {
         nombre: p.torneo.nombre,
         formato: p.torneo.formato,
         estado: p.torneo.estado,
-        cantidadEquipos: p.torneo.equipos.length,
+        cantidadEquipos: p.torneo._count.inscripciones,
         rol: p.rol,
       }))
       .sort((a, b) => {
@@ -281,27 +277,35 @@ export class UsersService {
 
     // Aceptar
     if (invitacion.tipo === TipoInvitacion.STAFF) {
+      if (!invitacion.torneoId) {
+        throw new BadRequestException('Invitación de staff sin torneo asociado');
+      }
       await this.prisma.usuarioTorneo.upsert({
         where: { usuarioId_torneoId: { usuarioId: userId, torneoId: invitacion.torneoId } },
         update: { rol: RolTorneo.STAFF },
         create: { usuarioId: userId, torneoId: invitacion.torneoId, rol: RolTorneo.STAFF },
       });
     } else if (invitacion.tipo === TipoInvitacion.JUGADOR) {
-      if (invitacion.equipoId) {
-        const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
-          where: { usuarioId_equipoId: { usuarioId: userId, equipoId: invitacion.equipoId } },
-        });
-        if (!yaEsMiembro) {
-          await this.prisma.usuarioEquipo.create({
-            data: { usuarioId: userId, equipoId: invitacion.equipoId },
-          });
-        }
+      if (!invitacion.equipoId) {
+        throw new BadRequestException('Invitación de jugador sin equipo asociado');
       }
-      await this.prisma.usuarioTorneo.upsert({
-        where: { usuarioId_torneoId: { usuarioId: userId, torneoId: invitacion.torneoId } },
-        update: {},
-        create: { usuarioId: userId, torneoId: invitacion.torneoId, rol: RolTorneo.JUGADOR },
+      const yaEsMiembro = await this.prisma.usuarioEquipo.findUnique({
+        where: { usuarioId_equipoId: { usuarioId: userId, equipoId: invitacion.equipoId } },
       });
+      if (!yaEsMiembro) {
+        await this.prisma.usuarioEquipo.create({
+          data: { usuarioId: userId, equipoId: invitacion.equipoId },
+        });
+      }
+      // Si la invitación viene atada a un torneo (legacy), también dar rol JUGADOR ahí.
+      // En el modelo nuevo, el rol JUGADOR se asigna al aprobar la inscripción con roster.
+      if (invitacion.torneoId) {
+        await this.prisma.usuarioTorneo.upsert({
+          where: { usuarioId_torneoId: { usuarioId: userId, torneoId: invitacion.torneoId } },
+          update: {},
+          create: { usuarioId: userId, torneoId: invitacion.torneoId, rol: RolTorneo.JUGADOR },
+        });
+      }
     }
 
     await this.prisma.invitacionPendiente.update({

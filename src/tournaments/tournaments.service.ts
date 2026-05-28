@@ -92,18 +92,21 @@ export class TournamentsService {
     const invitado = await this.prisma.usuario.findUnique({ where: { email } });
     if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
 
-    await this.prisma.invitacionPendiente.upsert({
-      where: { torneoId_email_tipo: { torneoId, email, tipo: TipoInvitacion.STAFF } },
-      update: {},
-      create: {
-        torneoId,
-        email,
-        tipo: TipoInvitacion.STAFF,
-        estado: EstadoInvitacion.PENDIENTE,
-        invitadoPor: userId,
-        usuarioId: invitado.id,
-      },
+    const existente = await this.prisma.invitacionPendiente.findFirst({
+      where: { torneoId, email, tipo: TipoInvitacion.STAFF },
     });
+    if (!existente) {
+      await this.prisma.invitacionPendiente.create({
+        data: {
+          torneoId,
+          email,
+          tipo: TipoInvitacion.STAFF,
+          estado: EstadoInvitacion.PENDIENTE,
+          invitadoPor: userId,
+          usuarioId: invitado.id,
+        },
+      });
+    }
 
     return { mensaje: 'Staff guardado correctamente' };
   }
@@ -218,7 +221,7 @@ export class TournamentsService {
       },
       include: {
         campos: true,
-        _count: { select: { equipos: true } },
+        _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -231,7 +234,7 @@ export class TournamentsService {
       maxJugadoresPorEquipo: t.maxJugadoresPorEquipo,
       estado: t.estado,
       maxEquipos: t.maxEquipos,
-      equiposInscritos: t._count.equipos,
+      equiposInscritos: t._count.inscripciones,
       fechaInicio: t.fechaInicio,
       fechaFin: t.fechaFin,
       zona: t.zona,
@@ -248,7 +251,10 @@ export class TournamentsService {
       where: { usuarioId: userId },
       include: {
         torneo: {
-          include: { campos: true, _count: { select: { equipos: true } } },
+          include: {
+            campos: true,
+            _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
+          },
         },
       },
     });
@@ -260,10 +266,14 @@ export class TournamentsService {
             email: usuario.email,
             tipo: TipoInvitacion.STAFF,
             estado: EstadoInvitacion.PENDIENTE,
+            torneoId: { not: null },
           },
           include: {
             torneo: {
-              include: { campos: true, _count: { select: { equipos: true } } },
+              include: {
+                campos: true,
+                _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
+              },
             },
           },
         })
@@ -279,7 +289,7 @@ export class TournamentsService {
       maxJugadoresPorEquipo: p.torneo.maxJugadoresPorEquipo,
       estado: p.torneo.estado,
       maxEquipos: p.torneo.maxEquipos,
-      equiposInscritos: p.torneo._count.equipos,
+      equiposInscritos: p.torneo._count.inscripciones,
       fechaInicio: p.torneo.fechaInicio,
       fechaFin: p.torneo.fechaFin,
       zona: p.torneo.zona,
@@ -289,6 +299,7 @@ export class TournamentsService {
     }));
 
     const pendientesStaff = invitacionesPendientes
+      .filter((i): i is typeof i & { torneo: NonNullable<typeof i.torneo> } => !!i.torneo)
       .filter((i) => !confirmadosIds.has(i.torneo.id))
       .map((i) => ({
         id: i.torneo.id,
@@ -298,7 +309,7 @@ export class TournamentsService {
         maxJugadoresPorEquipo: i.torneo.maxJugadoresPorEquipo,
         estado: i.torneo.estado,
         maxEquipos: i.torneo.maxEquipos,
-        equiposInscritos: i.torneo._count.equipos,
+        equiposInscritos: i.torneo._count.inscripciones,
         fechaInicio: i.torneo.fechaInicio,
         fechaFin: i.torneo.fechaFin,
         zona: i.torneo.zona,
@@ -328,9 +339,11 @@ export class TournamentsService {
             },
           },
         },
-        equipos: {
+        inscripciones: {
+          where: { estado: 'APROBADA' },
           include: {
-            jugadores: {
+            equipo: true,
+            roster: {
               include: {
                 usuario: {
                   select: { id: true, nombre: true, fotoPerfil: true },
@@ -339,7 +352,7 @@ export class TournamentsService {
             },
           },
         },
-        _count: { select: { equipos: true, partidos: true } },
+        _count: { select: { partidos: true } },
       },
     });
 
@@ -350,19 +363,24 @@ export class TournamentsService {
     );
     const rolUsuario = participacion?.rol ?? null;
 
-    const [inscripcionPendiente, equiposAprobados] = await Promise.all([
-      rolUsuario
-        ? Promise.resolve(null)
-        : this.prisma.inscripcion.findFirst({
-            where: {
-              torneoId: id,
-              estado: 'PENDIENTE',
-              equipo: { jugadores: { some: { usuarioId: userId } } },
-            },
-            select: { id: true },
-          }),
-      this.prisma.inscripcion.count({ where: { torneoId: id, estado: 'APROBADA' } }),
-    ]);
+    const inscripcionPendiente = rolUsuario
+      ? null
+      : await this.prisma.inscripcion.findFirst({
+          where: {
+            torneoId: id,
+            estado: 'PENDIENTE',
+            equipo: { jugadores: { some: { usuarioId: userId } } },
+          },
+          select: { id: true },
+        });
+
+    const equiposAprobados = torneo.inscripciones.length;
+    const equipos = torneo.inscripciones.map((ins) => ({
+      ...ins.equipo,
+      jugadores: ins.roster.map((r) => ({
+        usuario: r.usuario,
+      })),
+    }));
 
     return {
       id: torneo.id,
@@ -373,7 +391,7 @@ export class TournamentsService {
       maxJugadoresPorEquipo: torneo.maxJugadoresPorEquipo,
       estado: torneo.estado,
       maxEquipos: torneo.maxEquipos,
-      equiposInscritos: torneo._count.equipos,
+      equiposInscritos: equiposAprobados,
       equiposAprobados,
       totalPartidos: torneo._count.partidos,
       fechaInicio: torneo.fechaInicio,
@@ -381,7 +399,7 @@ export class TournamentsService {
       zona: torneo.zona,
       imagen: torneo.imagen,
       campos: torneo.campos,
-      equipos: torneo.equipos,
+      equipos,
       rolUsuario,
       tieneSolicitudPendiente: !!inscripcionPendiente,
       createdAt: torneo.createdAt,

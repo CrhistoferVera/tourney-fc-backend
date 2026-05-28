@@ -23,8 +23,8 @@ import {
 import { TeamsService } from './teams.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
+import { CreateInviteLinkDto } from './dto/invite-link.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { TeamEntity } from './entities/team.entity';
 
 @ApiTags('Teams')
 @ApiBearerAuth()
@@ -33,49 +33,26 @@ import { TeamEntity } from './entities/team.entity';
 export class TeamsController {
   constructor(private readonly teamsService: TeamsService) {}
 
-  @Post('tournament/:torneoId')
+  // ─── Equipos globales ────────────────────────────────────────────────────
+
+  @Post()
   @ApiOperation({
-    summary: 'Crear equipo en un torneo',
-    description:
-      'Crea un equipo y asigna al usuario como CAPITAN del torneo (HU-13)',
+    summary: 'Crear equipo global',
+    description: 'Crea un equipo independiente de torneos. El usuario queda como capitán.',
   })
-  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
-  @ApiResponse({ status: 201, description: 'Equipo creado', type: TeamEntity })
-  @ApiResponse({ status: 403, description: 'Sin permisos' })
-  @ApiResponse({ status: 404, description: 'Torneo no encontrado' })
-  create(
-    @Param('torneoId') torneoId: string,
-    @Request() req: any,
-    @Body() dto: CreateTeamDto,
-  ) {
-    return this.teamsService.create(torneoId, req.user.id, dto);
+  @ApiResponse({ status: 201, description: 'Equipo creado' })
+  createGlobal(@Request() req: any, @Body() dto: CreateTeamDto) {
+    return this.teamsService.createGlobal(req.user.id, dto);
   }
 
-  @Get('tournament/:torneoId')
-  @ApiOperation({
-    summary: 'Listar equipos de un torneo',
-    description: 'Retorna todos los equipos inscritos en un torneo (HU-20)',
-  })
-  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
-  @ApiResponse({
-    status: 200,
-    description: 'Lista de equipos',
-    type: [TeamEntity],
-  })
-  findAll(@Param('torneoId') torneoId: string) {
-    return this.teamsService.findAll(torneoId);
+  @Get('my')
+  @ApiOperation({ summary: 'Listar mis equipos (como capitán o jugador)' })
+  @ApiResponse({ status: 200, description: 'Lista de equipos' })
+  getMyTeams(@Request() req: any) {
+    return this.teamsService.getMyTeams(req.user.id);
   }
 
-  // ── Specific sub-routes BEFORE the generic /:id to avoid shadowing ──────────
-
-  @Get('tournament/:torneoId/my-team')
-  @ApiOperation({ summary: 'Obtener mi equipo en un torneo — CAPITAN o JUGADOR' })
-  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
-  @ApiResponse({ status: 200, description: 'Datos del equipo con jugadores e invitaciones pendientes' })
-  @ApiResponse({ status: 404, description: 'No tienes equipo en este torneo' })
-  getMyTeam(@Param('torneoId') torneoId: string, @Request() req: any) {
-    return this.teamsService.getMyTeam(torneoId, req.user.id);
-  }
+  // ─── Upload (debe ir antes que /:id) ─────────────────────────────────────
 
   @Post('upload-escudo')
   @UseInterceptors(FileInterceptor('image'))
@@ -87,37 +64,61 @@ export class TeamsController {
     return this.teamsService.uploadEscudo(file);
   }
 
-  // ── Generic /:id routes ──────────────────────────────────────────────────────
+  // ─── Vistas en contexto de torneo (antes que /:id) ───────────────────────
+
+  @Get('tournament/:torneoId')
+  @ApiOperation({
+    summary: 'Listar equipos APROBADOS de un torneo',
+  })
+  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Lista de equipos' })
+  findAllByTournament(@Param('torneoId') torneoId: string) {
+    return this.teamsService.findAllByTournament(torneoId);
+  }
+
+  @Get('tournament/:torneoId/my-team')
+  @ApiOperation({ summary: 'Obtener mi equipo (roster) en un torneo' })
+  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
+  getMyTeamInTournament(@Param('torneoId') torneoId: string, @Request() req: any) {
+    return this.teamsService.getMyTeam(torneoId, req.user.id);
+  }
+
+  // ─── Enlace de invitación (rutas estáticas antes que /:id) ───────────────
+
+  @Get('join/:code/preview')
+  @ApiOperation({ summary: 'Previsualizar enlace de invitación' })
+  @ApiParam({ name: 'code', description: 'Código del enlace' })
+  preview(@Param('code') code: string, @Request() req: any) {
+    return this.teamsService.previewInviteLink(code, req.user?.id);
+  }
+
+  @Post('join/:code')
+  @ApiOperation({ summary: 'Canjear enlace de invitación' })
+  @ApiParam({ name: 'code', description: 'Código del enlace' })
+  joinByCode(@Param('code') code: string, @Request() req: any) {
+    return this.teamsService.joinByCode(code, req.user.id);
+  }
+
+  // ─── Detalle / mutación de un equipo concreto ────────────────────────────
+
+  @Get(':id/in-tournament/:torneoId')
+  @ApiOperation({ summary: 'Detalle de un equipo en el contexto de un torneo (roster + stats)' })
+  @ApiParam({ name: 'id', description: 'UUID del equipo' })
+  @ApiParam({ name: 'torneoId', description: 'UUID del torneo' })
+  findOneInTournament(@Param('id') id: string, @Param('torneoId') torneoId: string) {
+    return this.teamsService.findOneInTournament(id, torneoId);
+  }
 
   @Get(':id')
-  @ApiOperation({
-    summary: 'Detalle de un equipo',
-    description: 'Retorna datos del equipo con sus jugadores (HU-21)',
-  })
+  @ApiOperation({ summary: 'Detalle de un equipo global' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })
-  @ApiResponse({
-    status: 200,
-    description: 'Detalle del equipo',
-    type: TeamEntity,
-  })
-  @ApiResponse({ status: 404, description: 'Equipo no encontrado' })
-  findOne(@Param('id') id: string) {
-    return this.teamsService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.teamsService.findOne(id, req.user.id);
   }
 
   @Patch(':id')
-  @ApiOperation({
-    summary: 'Editar equipo',
-    description:
-      'Edita nombre, escudo o teléfono — solo CAPITAN, ORGANIZADOR o STAFF',
-  })
+  @ApiOperation({ summary: 'Editar equipo — solo capitán' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipo actualizado',
-    type: TeamEntity,
-  })
-  @ApiResponse({ status: 403, description: 'Sin permisos' })
   update(
     @Param('id') id: string,
     @Request() req: any,
@@ -127,23 +128,22 @@ export class TeamsController {
   }
 
   @Delete(':id')
-  @ApiOperation({
-    summary: 'Eliminar equipo',
-    description: 'Elimina el equipo — solo ORGANIZADOR o STAFF',
-  })
+  @ApiOperation({ summary: 'Eliminar equipo — solo capitán' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })
-  @ApiResponse({ status: 200, description: 'Equipo eliminado' })
-  @ApiResponse({ status: 403, description: 'Sin permisos' })
   remove(@Param('id') id: string, @Request() req: any) {
     return this.teamsService.remove(id, req.user.id);
   }
 
-  @Post(':id/invite-player')
-  @ApiOperation({ summary: 'Invitar jugador al equipo por correo — solo CAPITAN' })
+  @Delete(':id/leave')
+  @ApiOperation({ summary: 'Salir del equipo (jugador no-capitán)' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })
-  @ApiResponse({ status: 201, description: 'Jugador invitado correctamente' })
-  @ApiResponse({ status: 403, description: 'Solo el capitán puede invitar jugadores' })
-  @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
+  leave(@Param('id') id: string, @Request() req: any) {
+    return this.teamsService.leaveTeam(id, req.user.id);
+  }
+
+  @Post(':id/invite-player')
+  @ApiOperation({ summary: 'Invitar jugador por correo — solo capitán' })
+  @ApiParam({ name: 'id', description: 'UUID del equipo' })
   invitePlayer(
     @Param('id') id: string,
     @Request() req: any,
@@ -152,16 +152,21 @@ export class TeamsController {
     return this.teamsService.invitePlayer(id, req.user.id, body.email);
   }
 
-  @Post(':id/join')
-  @ApiOperation({
-    summary: 'Unirse a un equipo',
-    description:
-      'El usuario se une a un equipo mediante enlace de invitación (HU-17)',
-  })
+  @Post(':id/invite-link')
+  @ApiOperation({ summary: 'Generar enlace de invitación — solo capitán' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })
-  @ApiResponse({ status: 201, description: 'Unido al equipo exitosamente' })
-  @ApiResponse({ status: 403, description: 'Ya eres miembro de este equipo' })
-  joinTeam(@Param('id') id: string, @Request() req: any) {
-    return this.teamsService.joinTeam(id, req.user.id);
+  createInviteLink(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() dto: CreateInviteLinkDto,
+  ) {
+    return this.teamsService.createInviteLink(id, req.user.id, dto);
+  }
+
+  @Delete(':id/invite-link')
+  @ApiOperation({ summary: 'Revocar enlace de invitación — solo capitán' })
+  @ApiParam({ name: 'id', description: 'UUID del equipo' })
+  revokeInviteLink(@Param('id') id: string, @Request() req: any) {
+    return this.teamsService.revokeInviteLink(id, req.user.id);
   }
 }
