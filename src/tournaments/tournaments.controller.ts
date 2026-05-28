@@ -90,6 +90,19 @@ export class TournamentsController {
     return this.tournamentsService.findMy(req.user.id);
   }
 
+  @Get(':id/estadisticas')
+  @ApiOperation({
+    summary: 'Estadísticas globales del torneo',
+    description:
+      'Retorna liderazgos y resumen del torneo. CAPITAN/JUGADOR también reciben sus estadísticas personales.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({ status: 200, description: 'Estadísticas del torneo' })
+  @ApiResponse({ status: 404, description: 'Torneo no encontrado' })
+  getEstadisticas(@Param('id') id: string, @Request() req: any) {
+    return this.tournamentsService.getEstadisticas(id, req.user.id);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Detalle de un torneo',

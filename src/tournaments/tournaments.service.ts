@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
-import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion } from '@prisma/client';
+import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego } from '@prisma/client';
 import { Resend } from 'resend';
 import { ConfigService } from '@nestjs/config';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -589,5 +589,166 @@ export class TournamentsService {
       select: { id: true, nombre: true, direccion: true },
       orderBy: { nombre: 'asc' },
     });
+  }
+
+  async getEstadisticas(torneoId: string, userId: string) {
+    const participacion = await this.prisma.usuarioTorneo.findUnique({
+      where: { usuarioId_torneoId: { usuarioId: userId, torneoId } },
+      select: { rol: true },
+    });
+    const rol = participacion?.rol ?? null;
+    const wantPersonal = rol === RolTorneo.CAPITAN || rol === RolTorneo.JUGADOR;
+
+    const eventos = await this.prisma.eventoPartido.findMany({
+      where: {
+        partido: { torneoId },
+        tipo: {
+          in: [
+            TipoEvento.GOL,
+            TipoEvento.ASISTENCIA,
+            TipoEvento.TARJETA_AMARILLA,
+            TipoEvento.TARJETA_ROJA,
+            TipoEvento.FALTA,
+            TipoEvento.PENAL_FALLADO,
+          ],
+        },
+        jugadorId: { not: null },
+      },
+      select: {
+        jugadorId: true,
+        tipo: true,
+        jugador: { select: { id: true, nombre: true, fotoPerfil: true } },
+        equipo: { select: { nombre: true } },
+      },
+    });
+
+    type PlayerStats = {
+      nombre: string;
+      fotoPerfil: string | null;
+      equipoNombre: string;
+      goles: number;
+      asistencias: number;
+      amarillas: number;
+      rojas: number;
+      faltas: number;
+      penalesFallados: number;
+    };
+    const mapa = new Map<string, PlayerStats>();
+
+    for (const ev of eventos) {
+      if (!ev.jugadorId || !ev.jugador) continue;
+      if (!mapa.has(ev.jugadorId)) {
+        mapa.set(ev.jugadorId, {
+          nombre: ev.jugador.nombre,
+          fotoPerfil: ev.jugador.fotoPerfil,
+          equipoNombre: ev.equipo?.nombre ?? '',
+          goles: 0,
+          asistencias: 0,
+          amarillas: 0,
+          rojas: 0,
+          faltas: 0,
+          penalesFallados: 0,
+        });
+      }
+      const s = mapa.get(ev.jugadorId)!;
+      switch (ev.tipo) {
+        case TipoEvento.GOL:           s.goles++;           break;
+        case TipoEvento.ASISTENCIA:    s.asistencias++;     break;
+        case TipoEvento.TARJETA_AMARILLA: s.amarillas++;    break;
+        case TipoEvento.TARJETA_ROJA:  s.rojas++;           break;
+        case TipoEvento.FALTA:         s.faltas++;          break;
+        case TipoEvento.PENAL_FALLADO: s.penalesFallados++; break;
+      }
+    }
+
+    const totalPartidos = await this.prisma.partido.count({
+      where: { torneoId, faseJuego: FaseJuego.FINALIZADO },
+    });
+
+    const vals = [...mapa.values()];
+    const totalGoles          = vals.reduce((a, v) => a + v.goles, 0);
+    const totalAmarillas      = vals.reduce((a, v) => a + v.amarillas, 0);
+    const totalRojas          = vals.reduce((a, v) => a + v.rojas, 0);
+    const totalFaltas         = vals.reduce((a, v) => a + v.faltas, 0);
+    const promedioGoles       = totalPartidos === 0 ? 0 : +(totalGoles / totalPartidos).toFixed(2);
+
+    const buildFull = (key: keyof PlayerStats) =>
+      [...mapa.entries()]
+        .filter(([, v]) => (v[key] as number) > 0)
+        .sort((a, b) => (b[1][key] as number) - (a[1][key] as number))
+        .map(([jugadorId, v], idx) => ({
+          posicion: idx + 1,
+          jugadorId,
+          nombre: v.nombre,
+          fotoPerfil: v.fotoPerfil,
+          equipoNombre: v.equipoNombre,
+          valor: v[key] as number,
+        }));
+
+    const fullGoleadores      = buildFull('goles');
+    const fullAsistentes      = buildFull('asistencias');
+    const fullAmarillas       = buildFull('amarillas');
+    const fullRojas           = buildFull('rojas');
+    const fullFaltas          = buildFull('faltas');
+    const fullPenalesFallados = buildFull('penalesFallados');
+
+    const rankOf = (full: { jugadorId: string }[], id: string) => {
+      const idx = full.findIndex((e) => e.jugadorId === id);
+      return idx === -1 ? null : idx + 1;
+    };
+
+    type EstPersonales = {
+      goles: number; asistencias: number; tarjetasAmarillas: number;
+      tarjetasRojas: number; faltas: number; penalesFallados: number;
+      posicionGoles: number | null; posicionAsistencias: number | null;
+      posicionAmarillas: number | null; posicionRojas: number | null;
+      posicionFaltas: number | null; posicionPenalesFallados: number | null;
+    };
+    let estadisticasPersonales: EstPersonales | null = null;
+    if (wantPersonal) {
+      const personal = mapa.get(userId);
+      if (personal) {
+        estadisticasPersonales = {
+          goles:              personal.goles,
+          asistencias:        personal.asistencias,
+          tarjetasAmarillas:  personal.amarillas,
+          tarjetasRojas:      personal.rojas,
+          faltas:             personal.faltas,
+          penalesFallados:    personal.penalesFallados,
+          posicionGoles:          personal.goles > 0          ? rankOf(fullGoleadores, userId)      : null,
+          posicionAsistencias:    personal.asistencias > 0    ? rankOf(fullAsistentes, userId)      : null,
+          posicionAmarillas:      personal.amarillas > 0      ? rankOf(fullAmarillas, userId)       : null,
+          posicionRojas:          personal.rojas > 0          ? rankOf(fullRojas, userId)           : null,
+          posicionFaltas:         personal.faltas > 0         ? rankOf(fullFaltas, userId)          : null,
+          posicionPenalesFallados: personal.penalesFallados > 0 ? rankOf(fullPenalesFallados, userId) : null,
+        };
+      } else {
+        estadisticasPersonales = {
+          goles: 0, asistencias: 0, tarjetasAmarillas: 0,
+          tarjetasRojas: 0, faltas: 0, penalesFallados: 0,
+          posicionGoles: null, posicionAsistencias: null,
+          posicionAmarillas: null, posicionRojas: null,
+          posicionFaltas: null, posicionPenalesFallados: null,
+        };
+      }
+    }
+
+    return {
+      resumen: {
+        totalPartidos,
+        totalGoles,
+        totalTarjetasAmarillas: totalAmarillas,
+        totalTarjetasRojas: totalRojas,
+        promedioGolesPorPartido: promedioGoles,
+        totalFaltas,
+      },
+      goleadores:      fullGoleadores.slice(0, 10),
+      asistentes:      fullAsistentes.slice(0, 10),
+      amarillas:       fullAmarillas.slice(0, 10),
+      rojas:           fullRojas.slice(0, 10),
+      faltas:          fullFaltas.slice(0, 10),
+      penalesFallados: fullPenalesFallados.slice(0, 10),
+      estadisticasPersonales,
+    };
   }
 }
