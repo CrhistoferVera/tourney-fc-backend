@@ -309,6 +309,7 @@ model Partido {
   faseJuego        FaseJuego     @default(PREVIA)
   minutosJugados   Int           @default(0)
   cronometroIniciadoEn DateTime?
+  finalizadoEn     DateTime?
 
   golesLocal       Int?
   golesVisitante   Int?
