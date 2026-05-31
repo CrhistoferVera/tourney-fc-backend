@@ -283,6 +283,21 @@ export class TournamentsController {
     return this.tournamentsService.responderInscripcion(id, inscripcionId, req.user.id, 'rechazar');
   }
 
+  @Post(':id/campos')
+  @ApiOperation({
+    summary: 'Agregar cancha a un torneo',
+    description: 'Permite agregar una cancha/campo de juego al torneo, incluso si está EN_CURSO — solo ORGANIZADOR',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiResponse({ status: 201, description: 'Cancha agregada' })
+  addCampo(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { nombre: string; direccion?: string },
+  ) {
+    return this.tournamentsService.addCampo(id, req.user.id, body);
+  }
+
   @Get(':id/campos')
   @ApiOperation({
     summary: 'Listar canchas del torneo',

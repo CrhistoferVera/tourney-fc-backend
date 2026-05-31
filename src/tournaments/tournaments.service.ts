@@ -583,6 +583,25 @@ export class TournamentsService {
     }
   }
 
+  async addCampo(torneoId: string, userId: string, dto: { nombre: string; direccion?: string }) {
+    const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
+    if (!torneo) throw new NotFoundException('Torneo no encontrado');
+
+    await this.checkOrganizador(torneoId, userId);
+
+    if (!dto.nombre) {
+      throw new BadRequestException('El nombre de la cancha es requerido');
+    }
+
+    return this.prisma.campoJuego.create({
+      data: {
+        torneoId,
+        nombre: dto.nombre,
+        direccion: dto.direccion,
+      },
+    });
+  }
+
   async getCampos(torneoId: string) {
     return this.prisma.campoJuego.findMany({
       where: { torneoId },
