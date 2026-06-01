@@ -329,6 +329,11 @@ export class MatchesService {
     const now = new Date();
 
     if (dto.action === MatchControlAction.START_FIRST_HALF) {
+      if (partido.torneo.estado !== EstadoTorneo.EN_CURSO) {
+        throw new BadRequestException(
+          'El torneo debe estar en curso para iniciar partidos. Cierra las inscripciones primero.',
+        );
+      }
       if (partido.estado !== EstadoPartido.CONFIRMADO) {
         throw new BadRequestException('No se puede iniciar un partido que no está en estado Confirmado. Primero debes programarlo.');
       }
@@ -812,39 +817,30 @@ export class MatchesService {
     return diffMinutes * 60 * 1000;
   }
 
-  private getCampoOccupiedRange(
-    partido: {
-      fecha: Date | null;
+  private partidoCampoHorarioConflicto(
+    targetMs: number,
+    otro: {
+      fecha: Date;
       faseJuego: FaseJuego;
       estado: EstadoPartido;
       finalizadoEn: Date | null;
     },
     bufferMs: number,
-  ): { start: number; end: number } | null {
-    if (!partido.fecha) return null;
-    const scheduled = partido.fecha.getTime();
+  ): boolean {
+    const otherStart = otro.fecha.getTime();
 
-    if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const ended = partido.finalizadoEn
-        ? partido.finalizadoEn.getTime()
-        : scheduled;
-      return {
-        start: scheduled - bufferMs,
-        end: ended + bufferMs,
-      };
+    if (otro.faseJuego === FaseJuego.FINALIZADO) {
+      const ended = otro.finalizadoEn
+        ? otro.finalizadoEn.getTime()
+        : otherStart;
+      return targetMs < ended + bufferMs;
     }
 
-    if (partido.estado === EstadoPartido.EN_CURSO) {
-      return {
-        start: scheduled - bufferMs,
-        end: Date.now() + bufferMs,
-      };
+    if (otro.estado === EstadoPartido.EN_CURSO) {
+      return targetMs < Date.now() + bufferMs;
     }
 
-    return {
-      start: scheduled - bufferMs,
-      end: scheduled + bufferMs,
-    };
+    return Math.abs(targetMs - otherStart) < bufferMs;
   }
 
   private async assertNoCampoConflict(
@@ -856,8 +852,6 @@ export class MatchesService {
   ): Promise<void> {
     const bufferMs = this.getCampoBufferMs(modalidad);
     const targetMs = targetFecha.getTime();
-    const newStart = targetMs - bufferMs;
-    const newEnd = targetMs + bufferMs;
 
     const otros = await this.prisma.partido.findMany({
       where: {
@@ -876,12 +870,11 @@ export class MatchesService {
     });
 
     for (const otro of otros) {
-      const range = this.getCampoOccupiedRange(otro, bufferMs);
-      if (!range) continue;
-      if (newStart < range.end && newEnd > range.start) {
+      if (!otro.fecha) continue;
+      if (this.partidoCampoHorarioConflicto(targetMs, { ...otro, fecha: otro.fecha }, bufferMs)) {
         const hoursText = modalidad === 'FUTBOL_11' ? '2 horas' : '1 hora y 15 minutos';
         throw new BadRequestException(
-          `Ya hay un partido en esta cancha con menos de ${hoursText} de diferencia respecto a ese horario.`,
+          `Ya hay un partido en esta cancha con menos de ${hoursText} de diferencia entre horarios de inicio.`,
         );
       }
     }
