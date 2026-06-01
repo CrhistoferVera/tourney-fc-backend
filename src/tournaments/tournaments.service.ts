@@ -10,7 +10,7 @@ import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego, FormatoTorneo } from '@prisma/client';
-import { Resend } from 'resend';
+import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { MatchesService } from '../matches/matches.service';
@@ -18,7 +18,7 @@ import { MatchesService } from '../matches/matches.service';
 @Injectable()
 export class TournamentsService {
   private readonly logger = new Logger(TournamentsService.name);
-  private readonly resend: Resend;
+  private readonly mailer: nodemailer.Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -26,7 +26,15 @@ export class TournamentsService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly matchesService: MatchesService,
   ) {
-    this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
+    this.mailer = nodemailer.createTransport({
+      host: this.configService.get<string>('EMAIL_HOST'),
+      port: this.configService.get<number>('EMAIL_PORT'),
+      secure: false,
+      auth: {
+        user: this.configService.get<string>('EMAIL_USER'),
+        pass: this.configService.get<string>('EMAIL_PASS'),
+      },
+    });
   }
 
   async uploadImage(file: Express.Multer.File) {
@@ -560,8 +568,8 @@ export class TournamentsService {
         });
 
         try {
-          await this.resend.emails.send({
-            from: this.configService.get<string>('RESEND_FROM')!,
+          await this.mailer.sendMail({
+            from: this.configService.get<string>('EMAIL_FROM'),
             to: invitacion.email,
             subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
             html: `
