@@ -365,10 +365,12 @@ export class MatchesService {
       }
       data.cronometroIniciadoEn = null;
 
-      if (isCopa && isEmpate && partido.faseJuego === FaseJuego.SEGUNDO_TIEMPO) {
-        // Empate en tiempo regular en torneo Copa: no finaliza el partido, se pausa en SEGUNDO_TIEMPO esperando penales
-        data.faseJuego = FaseJuego.SEGUNDO_TIEMPO;
+      if (isCopa && isEmpate && partido.faseJuego !== FaseJuego.PENALES) {
+        // Empate en torneo Copa/Eliminatoria: si se finaliza el partido, se debe pasar a penales
+        data.faseJuego = FaseJuego.PENALES;
         data.estado = EstadoPartido.EN_CURSO;
+        if (partido.golesPenalesLocal === null) data.golesPenalesLocal = 0;
+        if (partido.golesPenalesVisitante === null) data.golesPenalesVisitante = 0;
       } else {
         data.faseJuego = FaseJuego.FINALIZADO;
         data.finalizadoEn = now;
