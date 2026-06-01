@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsDateString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsDateString, IsInt } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { EstadoPartido } from '@prisma/client';
 
@@ -17,4 +17,24 @@ export class UpdateMatchDto {
   @IsOptional()
   @IsString()
   campoId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesLocal?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesVisitante?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesPenalesLocal?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  golesPenalesVisitante?: number;
 }
