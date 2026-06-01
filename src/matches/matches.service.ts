@@ -366,7 +366,6 @@ export class MatchesService {
       data.cronometroIniciadoEn = null;
 
       if (isCopa && isEmpate && partido.faseJuego !== FaseJuego.PENALES) {
-        // Empate en torneo Copa/Eliminatoria: si se finaliza el partido, se debe pasar a penales
         data.faseJuego = FaseJuego.PENALES;
         data.estado = EstadoPartido.EN_CURSO;
         if (partido.golesPenalesLocal === null) data.golesPenalesLocal = 0;
@@ -405,7 +404,7 @@ export class MatchesService {
         try {
           await this.syncCopaBracket(partido.torneoId);
         } catch (err) {
-          this.logger.error(`Error al avanzar ganador en copa: ${err.message}`);
+          this.logger.error(`Error al avanzar ganador en copa: ${(err as Error).message}`);
         }
       }
     }
