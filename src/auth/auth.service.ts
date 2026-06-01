@@ -64,7 +64,10 @@ export class AuthService {
 
     this.logger.log(`Usuario registrado exitosamente: ${user.email}`);
 
+    const token = this.jwtService.sign({ sub: user.id, email: user.email });
+
     return {
+      accessToken: token,
       id: user.id,
       nombre: user.nombre,
       email: user.email,
