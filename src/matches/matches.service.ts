@@ -68,8 +68,7 @@ export class MatchesService {
       (partido.torneo.formato === FormatoTorneo.COPA ||
         partido.torneo.formato === FormatoTorneo.ELIMINATORIA)
     ) {
-      const winnerId = this.getCopaWinnerId(partido);
-      const equipo = await this.prisma.equipo.findUnique({
+      const winnerId = this.getCopaWinnerId(partido);      if (!winnerId) return null;      const equipo = await this.prisma.equipo.findUnique({
         where: { id: winnerId },
         select: { nombre: true, escudo: true },
       });
@@ -102,6 +101,8 @@ export class MatchesService {
     if (!final) return null;
 
     const winnerId = this.getCopaWinnerId(final);
+    if (!winnerId) return null;
+    
     return this.prisma.equipo.findUnique({
       where: { id: winnerId },
       select: { nombre: true, escudo: true },
@@ -213,17 +214,21 @@ export class MatchesService {
       );
     }
 
+    // Determinar si se debe cambiar estado a CONFIRMADO
+    // Se cambia cuando se asigna fecha o cancha, el partido está PENDIENTE, y el torneo está EN_INSCRIPCION o EN_CURSO
+    const shouldConfirmFromSchedule =
+      (dto.fecha || dto.campoId !== undefined) &&
+      partido.estado === EstadoPartido.PENDIENTE &&
+      (partido.torneo.estado === EstadoTorneo.EN_INSCRIPCION ||
+        partido.torneo.estado === EstadoTorneo.EN_CURSO);
+
     const updated = await this.prisma.partido.update({
       where: { id: partidoId },
       data: {
         ...(dto.estado && { estado: dto.estado }),
         ...(dto.fecha && { fecha: new Date(dto.fecha) }),
         ...(dto.campoId !== undefined && { campoId: dto.campoId }),
-        ...(dto.fecha || dto.campoId) &&
-          partido.estado === EstadoPartido.PENDIENTE &&
-          partido.torneo.estado === EstadoTorneo.EN_CURSO && {
-            estado: EstadoPartido.CONFIRMADO,
-          },
+        ...(shouldConfirmFromSchedule && { estado: EstadoPartido.CONFIRMADO }),
       },
       include: {
         equipoLocal: { select: { id: true, nombre: true } },
@@ -823,16 +828,19 @@ export class MatchesService {
     faseJuego: FaseJuego;
     golesLocal: number | null;
     golesVisitante: number | null;
+    golesPenalesLocal: number | null;
+    golesPenalesVisitante: number | null;
     estado: EstadoPartido;
   }): boolean {
     if (partido.faseJuego === FaseJuego.FINALIZADO) return true;
-    return (
-      partido.golesLocal !== null &&
-      partido.golesVisitante !== null &&
-      (partido.estado === EstadoPartido.CONFIRMADO ||
-        partido.estado === EstadoPartido.ESPERANDO_CONFIRMACION ||
-        partido.estado === EstadoPartido.EN_DISPUTA)
-    );
+    if (
+      partido.faseJuego === FaseJuego.PENALES &&
+      partido.golesPenalesLocal !== null &&
+      partido.golesPenalesVisitante !== null
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private getCopaWinnerId(partido: {
@@ -842,14 +850,26 @@ export class MatchesService {
     golesPenalesVisitante: number | null;
     equipoLocalId: string;
     equipoVisitanteId: string;
-  }): string {
-    const gl = partido.golesLocal ?? 0;
-    const gv = partido.golesVisitante ?? 0;
+  }): string | null {
+    if (partido.golesLocal === null || partido.golesVisitante === null) {
+      return null;
+    }
+    
+    const gl = partido.golesLocal;
+    const gv = partido.golesVisitante;
     if (gl > gv) return partido.equipoLocalId;
     if (gv > gl) return partido.equipoVisitanteId;
-    const penL = partido.golesPenalesLocal ?? 0;
-    const penV = partido.golesPenalesVisitante ?? 0;
-    return penL >= penV ? partido.equipoLocalId : partido.equipoVisitanteId;
+    
+    if (
+      partido.golesPenalesLocal !== null &&
+      partido.golesPenalesVisitante !== null
+    ) {
+      const penL = partido.golesPenalesLocal;
+      const penV = partido.golesPenalesVisitante;
+      return penL > penV ? partido.equipoLocalId : partido.equipoVisitanteId;
+    }
+    
+    return null;
   }
 
   private getCopaFaseLabel(matchesInRoundCount: number): string {
@@ -859,7 +879,6 @@ export class MatchesService {
     return `Ronda de ${matchesInRoundCount}`;
   }
 
-  /** Crea o actualiza partidos de la siguiente ronda según ganadores conocidos. */
   async syncCopaBracket(torneoId: string): Promise<void> {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id: torneoId },
@@ -896,13 +915,16 @@ export class MatchesService {
           continue;
         }
 
+        const localWinnerId = this.getCopaWinnerId(m1);
+        const visitanteWinnerId = this.getCopaWinnerId(m2);
+        
+        if (!localWinnerId || !visitanteWinnerId) {
+          continue;
+        }
+
         const isEven = mIndex % 2 === 0;
-        const localWinnerId = isEven
-          ? this.getCopaWinnerId(m1)
-          : this.getCopaWinnerId(m2);
-        const visitanteWinnerId = isEven
-          ? this.getCopaWinnerId(m2)
-          : this.getCopaWinnerId(m1);
+        const realLocalId = isEven ? localWinnerId : visitanteWinnerId;
+        const realVisitanteId = isEven ? visitanteWinnerId : localWinnerId;
 
         const nextRound = ronda + 1;
         const nextMatchIndex = Math.floor(mIndex / 2);
@@ -916,14 +938,14 @@ export class MatchesService {
         if (matchesInNextRound.length > nextMatchIndex) {
           const existing = matchesInNextRound[nextMatchIndex];
           if (
-            existing.equipoLocalId !== localWinnerId ||
-            existing.equipoVisitanteId !== visitanteWinnerId
+            existing.equipoLocalId !== realLocalId ||
+            existing.equipoVisitanteId !== realVisitanteId
           ) {
             await this.prisma.partido.update({
               where: { id: existing.id },
               data: {
-                equipoLocalId: localWinnerId,
-                equipoVisitanteId: visitanteWinnerId,
+                equipoLocalId: realLocalId,
+                equipoVisitanteId: realVisitanteId,
               },
             });
           }
@@ -933,8 +955,8 @@ export class MatchesService {
               torneoId,
               ronda: nextRound,
               fase: nextFaseLabel,
-              equipoLocalId: localWinnerId,
-              equipoVisitanteId: visitanteWinnerId,
+              equipoLocalId: realLocalId,
+              equipoVisitanteId: realVisitanteId,
               estado: EstadoPartido.PENDIENTE,
               faseJuego: FaseJuego.PREVIA,
             },
