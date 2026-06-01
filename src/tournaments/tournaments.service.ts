@@ -9,10 +9,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
-import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego } from '@prisma/client';
+import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego, FormatoTorneo } from '@prisma/client';
 import { Resend } from 'resend';
 import { ConfigService } from '@nestjs/config';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { MatchesService } from '../matches/matches.service';
 
 @Injectable()
 export class TournamentsService {
@@ -23,6 +24,7 @@ export class TournamentsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly matchesService: MatchesService,
   ) {
     this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
   }
@@ -382,6 +384,11 @@ export class TournamentsService {
       })),
     }));
 
+    const ganadorTorneo =
+      torneo.estado === EstadoTorneo.FINALIZADO
+        ? await this.matchesService.getGanadorTorneo(id)
+        : null;
+
     return {
       id: torneo.id,
       nombre: torneo.nombre,
@@ -403,6 +410,7 @@ export class TournamentsService {
       rolUsuario,
       tieneSolicitudPendiente: !!inscripcionPendiente,
       createdAt: torneo.createdAt,
+      ganadorTorneo,
     };
   }
 
@@ -412,13 +420,76 @@ export class TournamentsService {
 
     await this.checkOrganizador(id, userId);
 
-    if (
-      torneo.estado === EstadoTorneo.EN_CURSO ||
-      torneo.estado === EstadoTorneo.FINALIZADO
-    ) {
-      throw new ForbiddenException(
-        'No se puede editar un torneo en curso o finalizado',
-      );
+    if (torneo.estado === EstadoTorneo.FINALIZADO) {
+      throw new ForbiddenException('No se puede editar un torneo finalizado');
+    }
+
+    if (torneo.estado === EstadoTorneo.EN_CURSO) {
+      const disallowed = (
+        ['nombre', 'descripcion', 'formato', 'modalidad', 'maxJugadoresPorEquipo', 'maxEquipos', 'fechaInicio', 'zona', 'imagen'] as const
+      ).filter((key) => dto[key] !== undefined);
+      if (disallowed.length > 0) {
+        throw new ForbiddenException(
+          'Con el torneo en curso solo puedes modificar la fecha de fin',
+        );
+      }
+
+      const data: Record<string, unknown> = {};
+
+      if (dto.fechaFin !== undefined) {
+        const fin = new Date(dto.fechaFin);
+        const inicio = torneo.fechaInicio ? new Date(torneo.fechaInicio) : null;
+        if (inicio) {
+          inicio.setHours(0, 0, 0, 0);
+          const finDay = new Date(fin);
+          finDay.setHours(0, 0, 0, 0);
+          if (finDay < inicio) {
+            throw new BadRequestException(
+              'La fecha de fin no puede ser anterior a la fecha de inicio',
+            );
+          }
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const finDay = new Date(fin);
+        finDay.setHours(0, 0, 0, 0);
+        if (finDay < today) {
+          throw new BadRequestException(
+            'La fecha de fin no puede ser anterior a la fecha actual',
+          );
+        }
+
+        const ultimoPartido = await this.prisma.partido.findFirst({
+          where: { torneoId: id, fecha: { not: null } },
+          orderBy: { fecha: 'desc' },
+          select: { fecha: true },
+        });
+        if (ultimoPartido?.fecha) {
+          const ultima = new Date(ultimoPartido.fecha);
+          ultima.setHours(0, 0, 0, 0);
+          if (finDay < ultima) {
+            throw new BadRequestException(
+              'La fecha de fin no puede ser anterior a la de un partido ya programado',
+            );
+          }
+        }
+
+        data.fechaFin = fin;
+      }
+
+      if (Object.keys(data).length === 0) {
+        throw new BadRequestException('No hay cambios para guardar');
+      }
+
+      const updated = await this.prisma.torneo.update({
+        where: { id },
+        data,
+        include: { campos: true },
+      });
+
+      this.logger.log(`Torneo en curso actualizado: ${id}`);
+      return updated;
     }
 
     const updated = await this.prisma.torneo.update({

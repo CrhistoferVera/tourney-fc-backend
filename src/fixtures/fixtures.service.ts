@@ -7,12 +7,16 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolTorneo, EstadoPartido, FormatoTorneo } from '@prisma/client';
+import { MatchesService } from '../matches/matches.service';
 
 @Injectable()
 export class FixturesService {
   private readonly logger = new Logger(FixturesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matchesService: MatchesService,
+  ) {}
 
   async generate(torneoId: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
@@ -69,6 +73,24 @@ export class FixturesService {
 
   // Ver fixture completo — HU-23
   async findAll(torneoId: string) {
+    const torneo = await this.prisma.torneo.findUnique({
+      where: { id: torneoId },
+      select: { formato: true },
+    });
+    if (
+      torneo &&
+      (torneo.formato === FormatoTorneo.COPA ||
+        torneo.formato === FormatoTorneo.ELIMINATORIA)
+    ) {
+      try {
+        await this.matchesService.syncCopaBracket(torneoId);
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo sincronizar bracket de copa para ${torneoId}: ${err.message}`,
+        );
+      }
+    }
+
     const partidos = await this.prisma.partido.findMany({
       where: { torneoId },
       include: {
