@@ -11,6 +11,7 @@ import { InscriptionsModule } from './inscriptions/inscriptions.module';
 import { FixturesModule } from './fixtures/fixtures.module';
 import { MatchesModule } from './matches/matches.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { InviteModule } from './invite/invite.module';
 
 
 
@@ -26,6 +27,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     FixturesModule,
     MatchesModule,
     CloudinaryModule,
+    InviteModule,
 
   ],
   controllers: [AppController],
