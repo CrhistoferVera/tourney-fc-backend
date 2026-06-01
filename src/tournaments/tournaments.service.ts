@@ -206,6 +206,7 @@ export class TournamentsService {
 
     const inscripcion = await this.prisma.inscripcion.findUnique({
       where: { id: inscripcionId },
+      include: { equipo: true, roster: true },
     });
     if (inscripcion?.torneoId !== torneoId)
       throw new NotFoundException('Solicitud no encontrada');
@@ -216,6 +217,20 @@ export class TournamentsService {
       where: { id: inscripcionId },
       data: { estado: accion === 'aprobar' ? 'APROBADA' : 'RECHAZADA' },
     });
+
+    if (accion === 'aprobar') {
+      for (const r of inscripcion.roster) {
+        const rol =
+          r.usuarioId === inscripcion.equipo.capitanId
+            ? RolTorneo.CAPITAN
+            : RolTorneo.JUGADOR;
+        await this.prisma.usuarioTorneo.upsert({
+          where: { usuarioId_torneoId: { usuarioId: r.usuarioId, torneoId } },
+          update: { rol },
+          create: { usuarioId: r.usuarioId, torneoId, rol },
+        });
+      }
+    }
 
     return { mensaje: accion === 'aprobar' ? 'Equipo aprobado' : 'Equipo rechazado' };
   }
@@ -307,7 +322,50 @@ export class TournamentsService {
       zona: p.torneo.zona,
       imagen: p.torneo.imagen,
       rolUsuario: p.rol,
+      tieneSolicitudPendiente: false,
       campos: p.torneo.campos,
+    }));
+
+    // Torneos donde el usuario está en un roster PENDIENTE o APROBADO
+    // pero aún no tiene UsuarioTorneo (roles no asignados — fallback)
+    const inscripcionesRoster = await this.prisma.inscripcion.findMany({
+      where: {
+        estado: { in: ['PENDIENTE', 'APROBADA'] },
+        roster: { some: { usuarioId: userId } },
+        torneoId: { notIn: [...confirmadosIds] },
+      },
+      include: {
+        torneo: {
+          include: {
+            campos: true,
+            _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
+          },
+        },
+        equipo: { select: { capitanId: true } },
+      },
+    });
+
+    const desdeRoster = inscripcionesRoster.map((ins) => ({
+      id: ins.torneo.id,
+      nombre: ins.torneo.nombre,
+      formato: ins.torneo.formato,
+      modalidad: ins.torneo.modalidad,
+      maxJugadoresPorEquipo: ins.torneo.maxJugadoresPorEquipo,
+      estado: ins.torneo.estado,
+      maxEquipos: ins.torneo.maxEquipos,
+      equiposInscritos: ins.torneo._count.inscripciones,
+      fechaInicio: ins.torneo.fechaInicio,
+      fechaFin: ins.torneo.fechaFin,
+      zona: ins.torneo.zona,
+      imagen: ins.torneo.imagen,
+      rolUsuario:
+        ins.estado === 'APROBADA'
+          ? ins.equipo.capitanId === userId
+            ? RolTorneo.CAPITAN
+            : RolTorneo.JUGADOR
+          : null,
+      tieneSolicitudPendiente: ins.estado === 'PENDIENTE',
+      campos: ins.torneo.campos,
     }));
 
     const pendientesStaff = invitacionesPendientes
@@ -334,7 +392,7 @@ export class TournamentsService {
       EN_CURSO: 0, EN_INSCRIPCION: 1, BORRADOR: 2, FINALIZADO: 3,
     };
 
-    return [...confirmados, ...pendientesStaff].sort(
+    return [...confirmados, ...pendientesStaff, ...desdeRoster].sort(
       (a, b) => (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4),
     );
   }
@@ -373,18 +431,33 @@ export class TournamentsService {
     const participacion = torneo.participantes.find(
       (p) => p.usuarioId === userId,
     );
-    const rolUsuario = participacion?.rol ?? null;
+    let rolUsuario: string | null = participacion?.rol ?? null;
 
-    const inscripcionPendiente = rolUsuario
-      ? null
-      : await this.prisma.inscripcion.findFirst({
-          where: {
-            torneoId: id,
-            estado: 'PENDIENTE',
-            equipo: { jugadores: { some: { usuarioId: userId } } },
-          },
-          select: { id: true },
-        });
+    // Fallback: si no hay UsuarioTorneo (roles no asignados), derivar desde el roster
+    let tieneSolicitudPendiente = false;
+    if (!rolUsuario) {
+      const inscripcionDelUsuario = await this.prisma.inscripcion.findFirst({
+        where: {
+          torneoId: id,
+          estado: { in: ['PENDIENTE', 'APROBADA'] },
+          roster: { some: { usuarioId: userId } },
+        },
+        include: { equipo: { select: { capitanId: true } } },
+      });
+      if (inscripcionDelUsuario) {
+        if (inscripcionDelUsuario.estado === 'PENDIENTE') {
+          tieneSolicitudPendiente = true;
+        } else {
+          rolUsuario =
+            inscripcionDelUsuario.equipo.capitanId === userId
+              ? RolTorneo.CAPITAN
+              : RolTorneo.JUGADOR;
+        }
+      }
+    }
+
+    // Mantener variable para compatibilidad con el resto del método
+    const inscripcionPendiente = tieneSolicitudPendiente ? { id: 'derived' } : null;
 
     const equiposAprobados = torneo.inscripciones.length;
     const equipos = torneo.inscripciones.map((ins) => ({
