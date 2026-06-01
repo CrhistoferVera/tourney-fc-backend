@@ -182,6 +182,8 @@ model CampoJuego {
   torneoId  String
   nombre    String
   direccion String?
+  latitud   Float?
+  longitud  Float?
   createdAt DateTime @default(now())
 
   torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)

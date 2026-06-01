@@ -293,7 +293,7 @@ export class TournamentsController {
   addCampo(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { nombre: string; direccion?: string },
+    @Body() body: { nombre: string; direccion?: string; latitud?: number; longitud?: number },
   ) {
     return this.tournamentsService.addCampo(id, req.user.id, body);
   }

@@ -64,6 +64,8 @@ export class TournamentsService {
               create: dto.campos.map((c) => ({
                 nombre: c.nombre,
                 direccion: c.direccion,
+                latitud: c.latitud,
+                longitud: c.longitud,
               })),
             }
           : undefined,
@@ -662,7 +664,11 @@ export class TournamentsService {
     }
   }
 
-  async addCampo(torneoId: string, userId: string, dto: { nombre: string; direccion?: string }) {
+  async addCampo(
+    torneoId: string,
+    userId: string,
+    dto: { nombre: string; direccion?: string; latitud?: number; longitud?: number },
+  ) {
     const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
@@ -677,6 +683,8 @@ export class TournamentsService {
         torneoId,
         nombre: dto.nombre,
         direccion: dto.direccion,
+        latitud: dto.latitud,
+        longitud: dto.longitud,
       },
     });
   }
@@ -684,7 +692,7 @@ export class TournamentsService {
   async getCampos(torneoId: string) {
     return this.prisma.campoJuego.findMany({
       where: { torneoId },
-      select: { id: true, nombre: true, direccion: true },
+      select: { id: true, nombre: true, direccion: true, latitud: true, longitud: true },
       orderBy: { nombre: 'asc' },
     });
   }
