@@ -124,22 +124,9 @@ export class MatchesService {
       throw new BadRequestException('No se puede editar un partido que ya está en curso');
     }
 
-    // Si está FINALIZADO, solo se permite editar dentro de los 3 minutos de gracia
+    // Si está FINALIZADO, no se permite editar
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException('No se puede editar un partido finalizado después del límite de corrección (3 minutos)');
-      }
-
-      const targetGolesPenalesLocal = dto.golesPenalesLocal !== undefined ? dto.golesPenalesLocal : partido.golesPenalesLocal;
-      const targetGolesPenalesVisitante = dto.golesPenalesVisitante !== undefined ? dto.golesPenalesVisitante : partido.golesPenalesVisitante;
-
-      if (targetGolesPenalesLocal !== null && targetGolesPenalesVisitante !== null) {
-        if (targetGolesPenalesLocal === targetGolesPenalesVisitante) {
-          throw new BadRequestException('No se puede terminar un partido como empate');
-        }
-      }
+      throw new BadRequestException('No se puede editar un partido finalizado');
     }
 
     // Si está CONFIRMADO, solo ORGANIZADOR o STAFF pueden cambiar estado a PENDIENTE
@@ -502,15 +489,9 @@ export class MatchesService {
       throw new BadRequestException('Las tarjetas amarillas y rojas deben ser asignadas a un jugador');
     }
 
-    // Validar límite de 3 minutos para partidos finalizados
+    // No se permiten registrar eventos en partidos finalizados
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException(
-          'No se pueden registrar eventos en un partido finalizado después del límite de corrección (3 minutos)',
-        );
-      }
+      throw new BadRequestException('No se pueden registrar eventos en un partido finalizado');
     }
 
     // Validaciones específicas para tanda de penales
@@ -664,15 +645,9 @@ export class MatchesService {
     if (!partido) throw new NotFoundException('Partido no encontrado');
     await this.checkOrganizadorOStaff(partido.torneoId, userId);
 
-    // Validar límite de 3 minutos para partidos finalizados
+    // No se permiten eliminar eventos en partidos finalizados
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException(
-          'No se pueden eliminar eventos en un partido finalizado después del límite de corrección (3 minutos)',
-        );
-      }
+      throw new BadRequestException('No se pueden eliminar eventos en un partido finalizado');
     }
 
     const evento = await this.prisma.eventoPartido.findUnique({
@@ -680,14 +655,6 @@ export class MatchesService {
     });
     if (!evento) throw new NotFoundException('Evento no encontrado');
 
-    // No se pueden editar los goles de tiempo regular en un partido con tanda de penales
-    if (partido.faseJuego === FaseJuego.FINALIZADO && partido.golesPenalesLocal !== null && partido.golesPenalesVisitante !== null) {
-      if (evento.tipo === TipoEvento.GOL && evento.detalle !== 'PENAL') {
-        throw new BadRequestException('No se pueden editar los goles de tiempo regular en un partido con tanda de penales.');
-      }
-    }
-
-    // Bloquear eliminación de tarjetas amarillas si el jugador tiene una roja automática
     if (evento.tipo === TipoEvento.TARJETA_AMARILLA && evento.jugadorId) {
       const automaticRedCard = await this.prisma.eventoPartido.findFirst({
         where: {
