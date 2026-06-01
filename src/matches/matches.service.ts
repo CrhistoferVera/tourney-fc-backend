@@ -124,13 +124,9 @@ export class MatchesService {
       throw new BadRequestException('No se puede editar un partido que ya está en curso');
     }
 
-    // Si está FINALIZADO, solo se permite editar dentro de los 3 minutos de gracia
+    // Si está FINALIZADO, no se permite editar
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException('No se puede editar un partido finalizado después del límite de corrección (3 minutos)');
-      }
+      throw new BadRequestException('No se puede editar un partido finalizado');
     }
 
     // Si está CONFIRMADO, solo ORGANIZADOR o STAFF pueden cambiar estado a PENDIENTE
@@ -229,6 +225,10 @@ export class MatchesService {
         ...(dto.fecha && { fecha: new Date(dto.fecha) }),
         ...(dto.campoId !== undefined && { campoId: dto.campoId }),
         ...(shouldConfirmFromSchedule && { estado: EstadoPartido.CONFIRMADO }),
+        ...(dto.golesLocal !== undefined && { golesLocal: dto.golesLocal }),
+        ...(dto.golesVisitante !== undefined && { golesVisitante: dto.golesVisitante }),
+        ...(dto.golesPenalesLocal !== undefined && { golesPenalesLocal: dto.golesPenalesLocal }),
+        ...(dto.golesPenalesVisitante !== undefined && { golesPenalesVisitante: dto.golesPenalesVisitante }),
       },
       include: {
         equipoLocal: { select: { id: true, nombre: true } },
@@ -236,6 +236,10 @@ export class MatchesService {
         campo: { select: { id: true, nombre: true } },
       },
     });
+
+    if (updated.faseJuego === FaseJuego.FINALIZADO) {
+      await this.handleMatchEndActions(partidoId, updated);
+    }
 
     this.logger.log(`Partido ${partidoId} actualizado`);
     return updated;
@@ -325,6 +329,11 @@ export class MatchesService {
     const now = new Date();
 
     if (dto.action === MatchControlAction.START_FIRST_HALF) {
+      if (partido.torneo.estado !== EstadoTorneo.EN_CURSO) {
+        throw new BadRequestException(
+          'El torneo debe estar en curso para iniciar partidos. Cierra las inscripciones primero.',
+        );
+      }
       if (partido.estado !== EstadoPartido.CONFIRMADO) {
         throw new BadRequestException('No se puede iniciar un partido que no está en estado Confirmado. Primero debes programarlo.');
       }
@@ -470,6 +479,13 @@ export class MatchesService {
     if (!partido) throw new NotFoundException('Partido no encontrado');
     await this.checkOrganizadorOStaff(partido.torneoId, userId);
 
+    // No se pueden editar los goles de tiempo regular en un partido con tanda de penales
+    if (partido.faseJuego === FaseJuego.FINALIZADO && partido.golesPenalesLocal !== null && partido.golesPenalesVisitante !== null) {
+      if (dto.tipo === TipoEvento.GOL && dto.detalle !== 'PENAL') {
+        throw new BadRequestException('No se pueden editar los goles de tiempo regular en un partido con tanda de penales.');
+      }
+    }
+
     // Validar que las tarjetas amarillas y rojas se asignen solo a jugadores
     if (
       (dto.tipo === TipoEvento.TARJETA_AMARILLA || dto.tipo === TipoEvento.TARJETA_ROJA) &&
@@ -478,14 +494,68 @@ export class MatchesService {
       throw new BadRequestException('Las tarjetas amarillas y rojas deben ser asignadas a un jugador');
     }
 
-    // Validar límite de 3 minutos para partidos finalizados
+    // No se permiten registrar eventos en partidos finalizados
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException(
-          'No se pueden registrar eventos en un partido finalizado después del límite de corrección (3 minutos)',
-        );
+      throw new BadRequestException('No se pueden registrar eventos en un partido finalizado');
+    }
+
+    // Validaciones específicas para tanda de penales
+    const isPenal = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL' || dto.tipo === TipoEvento.PENAL_FALLADO;
+    if (isPenal) {
+      if (partido.faseJuego === FaseJuego.PENALES && !dto.jugadorId) {
+        throw new BadRequestException('Se requiere asignar un jugador para el penal.');
+      }
+
+      // Obtener todos los eventos de penal de la tanda de este partido
+      const events = await this.prisma.eventoPartido.findMany({
+        where: {
+          partidoId,
+          OR: [
+            { tipo: TipoEvento.PENAL_FALLADO },
+            { tipo: TipoEvento.GOL, detalle: 'PENAL' },
+            {
+              partido: { faseJuego: FaseJuego.PENALES }
+            }
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const penaltyEvents = events.filter(ev => 
+        ev.detalle === 'PENAL' || 
+        ev.tipo === TipoEvento.PENAL_FALLADO ||
+        ev.minuto === null || 
+        ev.minuto === undefined
+      );
+
+      // 1. Validar alternancia: par -> Local, impar -> Visitante
+      const K = penaltyEvents.length;
+      if (K % 2 === 0) {
+        if (dto.equipoId !== partido.equipoLocalId) {
+          throw new BadRequestException('Es el turno del equipo local para patear.');
+        }
+      } else {
+        if (dto.equipoId !== partido.equipoVisitanteId) {
+          throw new BadRequestException('Es el turno del equipo visitante para patear.');
+        }
+      }
+
+      // 2. Validar que no repita tiro en el ciclo actual de pateadores
+      if (dto.jugadorId) {
+        const eligiblePlayers = await this.getEligiblePlayers(partidoId, dto.equipoId);
+        const N = eligiblePlayers.length;
+
+        if (N > 0) {
+          const teamPenalties = penaltyEvents.filter(ev => ev.equipoId === dto.equipoId && ev.jugadorId !== null);
+          const TK = teamPenalties.length; // Tiros ya realizados por su equipo
+          const cycleIndex = Math.floor(TK / N);
+          const cycleStartIndex = cycleIndex * N;
+          const kickedInCurrentCycle = teamPenalties.slice(cycleStartIndex).map(ev => ev.jugadorId);
+
+          if (kickedInCurrentCycle.includes(dto.jugadorId)) {
+            throw new BadRequestException('El jugador ya ha pateado en esta ronda/ciclo de penales.');
+          }
+        }
       }
     }
 
@@ -510,23 +580,21 @@ export class MatchesService {
       }
     });
 
-    // Actualizar goles si es GOL
+    // Actualizar goles si es GOL regular
     if (dto.tipo === TipoEvento.GOL) {
-      const isPenal = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL';
-      if (dto.equipoId === partido.equipoLocalId) {
-        await this.prisma.partido.update({
-          where: { id: partidoId },
-          data: isPenal
-            ? { golesPenalesLocal: { increment: 1 } }
-            : { golesLocal: { increment: 1 } },
-        });
-      } else if (dto.equipoId === partido.equipoVisitanteId) {
-        await this.prisma.partido.update({
-          where: { id: partidoId },
-          data: isPenal
-            ? { golesPenalesVisitante: { increment: 1 } }
-            : { golesVisitante: { increment: 1 } },
-        });
+      const isPenalEvent = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL';
+      if (!isPenalEvent) {
+        if (dto.equipoId === partido.equipoLocalId) {
+          await this.prisma.partido.update({
+            where: { id: partidoId },
+            data: { golesLocal: { increment: 1 } },
+          });
+        } else if (dto.equipoId === partido.equipoVisitanteId) {
+          await this.prisma.partido.update({
+            where: { id: partidoId },
+            data: { golesVisitante: { increment: 1 } },
+          });
+        }
       }
     }
 
@@ -566,6 +634,11 @@ export class MatchesService {
       }
     }
 
+    // Recalcular estado de la tanda de penales si corresponde
+    if (isPenal) {
+      await this.updatePenaltyShootoutState(partidoId);
+    }
+
     this.logger.log(`Evento ${dto.tipo} añadido al partido ${partidoId}`);
     return evento;
   }
@@ -577,15 +650,9 @@ export class MatchesService {
     if (!partido) throw new NotFoundException('Partido no encontrado');
     await this.checkOrganizadorOStaff(partido.torneoId, userId);
 
-    // Validar límite de 3 minutos para partidos finalizados
+    // No se permiten eliminar eventos en partidos finalizados
     if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const finishedAt = partido.finalizadoEn ? new Date(partido.finalizadoEn) : new Date(partido.updatedAt);
-      const threeMinutesMs = 3 * 60 * 1000;
-      if (new Date().getTime() - finishedAt.getTime() > threeMinutesMs) {
-        throw new BadRequestException(
-          'No se pueden eliminar eventos en un partido finalizado después del límite de corrección (3 minutos)',
-        );
-      }
+      throw new BadRequestException('No se pueden eliminar eventos en un partido finalizado');
     }
 
     const evento = await this.prisma.eventoPartido.findUnique({
@@ -593,7 +660,6 @@ export class MatchesService {
     });
     if (!evento) throw new NotFoundException('Evento no encontrado');
 
-    // Bloquear eliminación de tarjetas amarillas si el jugador tiene una roja automática
     if (evento.tipo === TipoEvento.TARJETA_AMARILLA && evento.jugadorId) {
       const automaticRedCard = await this.prisma.eventoPartido.findFirst({
         where: {
@@ -627,23 +693,21 @@ export class MatchesService {
       }
     }
 
-    // Revertir gol si fue GOL y eliminar asistencia si corresponde
+    // Revertir gol si fue GOL y no penal
     if (evento.tipo === TipoEvento.GOL) {
-      const isPenal = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL';
-      if (evento.equipoId === partido.equipoLocalId) {
-        await this.prisma.partido.update({
-          where: { id: partidoId },
-          data: isPenal
-            ? { golesPenalesLocal: { decrement: 1 } }
-            : { golesLocal: { decrement: 1 } },
-        });
-      } else if (evento.equipoId === partido.equipoVisitanteId) {
-        await this.prisma.partido.update({
-          where: { id: partidoId },
-          data: isPenal
-            ? { golesPenalesVisitante: { decrement: 1 } }
-            : { golesVisitante: { decrement: 1 } },
-        });
+      const isPenalEvent = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL';
+      if (!isPenalEvent) {
+        if (evento.equipoId === partido.equipoLocalId) {
+          await this.prisma.partido.update({
+            where: { id: partidoId },
+            data: { golesLocal: { decrement: 1 } },
+          });
+        } else if (evento.equipoId === partido.equipoVisitanteId) {
+          await this.prisma.partido.update({
+            where: { id: partidoId },
+            data: { golesVisitante: { decrement: 1 } },
+          });
+        }
       }
 
       // Eliminar asistencia asociada en cascada
@@ -672,6 +736,11 @@ export class MatchesService {
       if (redCard) {
         await this.prisma.eventoPartido.delete({ where: { id: redCard.id } });
       }
+    }
+
+    const isPenal = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL' || evento.tipo === TipoEvento.PENAL_FALLADO;
+    if (isPenal) {
+      await this.updatePenaltyShootoutState(partidoId);
     }
 
     this.logger.log(`Evento ${eventId} eliminado del partido ${partidoId}`);
@@ -748,39 +817,30 @@ export class MatchesService {
     return diffMinutes * 60 * 1000;
   }
 
-  private getCampoOccupiedRange(
-    partido: {
-      fecha: Date | null;
+  private partidoCampoHorarioConflicto(
+    targetMs: number,
+    otro: {
+      fecha: Date;
       faseJuego: FaseJuego;
       estado: EstadoPartido;
       finalizadoEn: Date | null;
     },
     bufferMs: number,
-  ): { start: number; end: number } | null {
-    if (!partido.fecha) return null;
-    const scheduled = partido.fecha.getTime();
+  ): boolean {
+    const otherStart = otro.fecha.getTime();
 
-    if (partido.faseJuego === FaseJuego.FINALIZADO) {
-      const ended = partido.finalizadoEn
-        ? partido.finalizadoEn.getTime()
-        : scheduled;
-      return {
-        start: scheduled - bufferMs,
-        end: ended + bufferMs,
-      };
+    if (otro.faseJuego === FaseJuego.FINALIZADO) {
+      const ended = otro.finalizadoEn
+        ? otro.finalizadoEn.getTime()
+        : otherStart;
+      return targetMs < ended + bufferMs;
     }
 
-    if (partido.estado === EstadoPartido.EN_CURSO) {
-      return {
-        start: scheduled - bufferMs,
-        end: Date.now() + bufferMs,
-      };
+    if (otro.estado === EstadoPartido.EN_CURSO) {
+      return targetMs < Date.now() + bufferMs;
     }
 
-    return {
-      start: scheduled - bufferMs,
-      end: scheduled + bufferMs,
-    };
+    return Math.abs(targetMs - otherStart) < bufferMs;
   }
 
   private async assertNoCampoConflict(
@@ -792,8 +852,6 @@ export class MatchesService {
   ): Promise<void> {
     const bufferMs = this.getCampoBufferMs(modalidad);
     const targetMs = targetFecha.getTime();
-    const newStart = targetMs - bufferMs;
-    const newEnd = targetMs + bufferMs;
 
     const otros = await this.prisma.partido.findMany({
       where: {
@@ -812,12 +870,11 @@ export class MatchesService {
     });
 
     for (const otro of otros) {
-      const range = this.getCampoOccupiedRange(otro, bufferMs);
-      if (!range) continue;
-      if (newStart < range.end && newEnd > range.start) {
+      if (!otro.fecha) continue;
+      if (this.partidoCampoHorarioConflicto(targetMs, { ...otro, fecha: otro.fecha }, bufferMs)) {
         const hoursText = modalidad === 'FUTBOL_11' ? '2 horas' : '1 hora y 15 minutos';
         throw new BadRequestException(
-          `Ya hay un partido en esta cancha con menos de ${hoursText} de diferencia respecto a ese horario.`,
+          `Ya hay un partido en esta cancha con menos de ${hoursText} de diferencia entre horarios de inicio.`,
         );
       }
     }
@@ -962,6 +1019,224 @@ export class MatchesService {
             },
           });
         }
+      }
+    }
+  }
+
+  async getAvailablePlayers(partidoId: string, equipoId: string): Promise<string[]> {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+      select: { torneoId: true },
+    });
+    if (!partido) return [];
+
+    const inscripcion = await this.prisma.inscripcion.findFirst({
+      where: {
+        torneoId: partido.torneoId,
+        equipoId: equipoId,
+        estado: 'APROBADA',
+      },
+      include: {
+        roster: {
+          select: { usuarioId: true },
+        },
+      },
+    });
+
+    if (inscripcion && inscripcion.roster.length > 0) {
+      return inscripcion.roster.map(r => r.usuarioId);
+    }
+
+    const teamPlayers = await this.prisma.usuarioEquipo.findMany({
+      where: { equipoId: equipoId },
+      select: { usuarioId: true },
+    });
+    return teamPlayers.map(tp => tp.usuarioId);
+  }
+
+  async getEligiblePlayers(partidoId: string, equipoId: string): Promise<string[]> {
+    const available = await this.getAvailablePlayers(partidoId, equipoId);
+
+    const redCards = await this.prisma.eventoPartido.findMany({
+      where: {
+        partidoId,
+        equipoId,
+        tipo: TipoEvento.TARJETA_ROJA,
+        jugadorId: { not: null },
+      },
+      select: { jugadorId: true },
+    });
+    const expelledIds = new Set(redCards.map(rc => rc.jugadorId!));
+
+    return available.filter(id => !expelledIds.has(id));
+  }
+
+  async handleMatchEndActions(partidoId: string, updated: any) {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+      include: { torneo: true },
+    });
+    if (!partido) return null;
+
+    const torneo = partido.torneo;
+    if (
+      torneo &&
+      (torneo.formato === FormatoTorneo.COPA ||
+        torneo.formato === FormatoTorneo.ELIMINATORIA)
+    ) {
+      try {
+        await this.syncCopaBracket(partido.torneoId);
+      } catch (err) {
+        this.logger.error(`Error al avanzar ganador en copa: ${(err as Error).message}`);
+      }
+    }
+
+    let ganadorTorneo: any = null;
+    if (torneo) {
+      if (torneo.formato === FormatoTorneo.LIGA) {
+        const pendingMatchesCount = await this.prisma.partido.count({
+          where: {
+            torneoId: partido.torneoId,
+            id: { not: partido.id },
+            faseJuego: { not: FaseJuego.FINALIZADO },
+          },
+        });
+        if (pendingMatchesCount === 0) {
+          await this.prisma.torneo.update({
+            where: { id: partido.torneoId },
+            data: { estado: 'FINALIZADO' },
+          });
+          ganadorTorneo = await this.getStandingsWinner(partido.torneoId);
+        }
+      } else {
+        if (partido.fase === 'Final') {
+          await this.prisma.torneo.update({
+            where: { id: partido.torneoId },
+            data: { estado: 'FINALIZADO' },
+          });
+          const currentGolesLocal = updated.golesLocal ?? 0;
+          const currentGolesVisitante = updated.golesVisitante ?? 0;
+          let winnerId: string;
+          if (currentGolesLocal > currentGolesVisitante) {
+            winnerId = updated.equipoLocalId;
+          } else if (currentGolesVisitante > currentGolesLocal) {
+            winnerId = updated.equipoVisitanteId;
+          } else {
+            const penLocal = updated.golesPenalesLocal ?? 0;
+            const penVis = updated.golesPenalesVisitante ?? 0;
+            winnerId = penLocal >= penVis ? updated.equipoLocalId : updated.equipoVisitanteId;
+          }
+          ganadorTorneo = await this.prisma.equipo.findUnique({
+            where: { id: winnerId },
+            select: { nombre: true, escudo: true },
+          });
+        }
+      }
+    }
+    return ganadorTorneo;
+  }
+
+  async updatePenaltyShootoutState(partidoId: string) {
+    const partido = await this.prisma.partido.findUnique({
+      where: { id: partidoId },
+      include: { torneo: true },
+    });
+    if (!partido) return;
+
+    const events = await this.prisma.eventoPartido.findMany({
+      where: {
+        partidoId,
+        OR: [
+          { tipo: TipoEvento.PENAL_FALLADO },
+          { tipo: TipoEvento.GOL, detalle: 'PENAL' },
+          {
+            partido: { faseJuego: FaseJuego.PENALES }
+          }
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const penaltyEvents = events.filter(ev => 
+      ev.detalle === 'PENAL' || 
+      ev.tipo === TipoEvento.PENAL_FALLADO ||
+      ev.minuto === null || 
+      ev.minuto === undefined
+    );
+
+    const localShots = penaltyEvents.filter(ev => ev.equipoId === partido.equipoLocalId);
+    const visitanteShots = penaltyEvents.filter(ev => ev.equipoId === partido.equipoVisitanteId);
+
+    const kicksLocal = localShots.length;
+    const kicksVisitante = visitanteShots.length;
+    const golesLocal = localShots.filter(ev => ev.tipo === TipoEvento.GOL).length;
+    const golesVisitante = visitanteShots.filter(ev => ev.tipo === TipoEvento.GOL).length;
+
+    let finished = false;
+    let winnerId: string | null = null;
+
+    if (kicksLocal <= 5 && kicksVisitante <= 5) {
+      const remLocal = 5 - kicksLocal;
+      const remVisitante = 5 - kicksVisitante;
+      const maxLocal = golesLocal + remLocal;
+      const maxVisitante = golesVisitante + remVisitante;
+
+      if (golesLocal > maxVisitante) {
+        finished = true;
+        winnerId = partido.equipoLocalId;
+      } else if (golesVisitante > maxLocal) {
+        finished = true;
+        winnerId = partido.equipoVisitanteId;
+      } else if (kicksLocal === 5 && kicksVisitante === 5) {
+        if (golesLocal !== golesVisitante) {
+          finished = true;
+          winnerId = golesLocal > golesVisitante ? partido.equipoLocalId : partido.equipoVisitanteId;
+        }
+      }
+    } else {
+      if (kicksLocal === kicksVisitante) {
+        if (golesLocal !== golesVisitante) {
+          finished = true;
+          winnerId = golesLocal > golesVisitante ? partido.equipoLocalId : partido.equipoVisitanteId;
+        }
+      }
+    }
+
+    if (finished) {
+      const now = new Date();
+      const updated = await this.prisma.partido.update({
+        where: { id: partidoId },
+        data: {
+          faseJuego: FaseJuego.FINALIZADO,
+          finalizadoEn: now,
+          estado: partido.torneo.formato === FormatoTorneo.LIGA
+            ? EstadoPartido.CONFIRMADO
+            : EstadoPartido.EN_DISPUTA,
+          golesPenalesLocal: golesLocal,
+          golesPenalesVisitante: golesVisitante,
+        },
+      });
+      await this.handleMatchEndActions(partidoId, updated);
+    } else {
+      if (partido.faseJuego === FaseJuego.FINALIZADO) {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: {
+            faseJuego: FaseJuego.PENALES,
+            finalizadoEn: null,
+            estado: EstadoPartido.EN_CURSO,
+            golesPenalesLocal: golesLocal,
+            golesPenalesVisitante: golesVisitante,
+          },
+        });
+      } else {
+        await this.prisma.partido.update({
+          where: { id: partidoId },
+          data: {
+            golesPenalesLocal: golesLocal,
+            golesPenalesVisitante: golesVisitante,
+          },
+        });
       }
     }
   }

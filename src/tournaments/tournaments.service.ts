@@ -497,11 +497,73 @@ export class TournamentsService {
     };
   }
 
+  private toDateOnlyString(value: string | Date): string {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        return trimmed.slice(0, 10);
+      }
+    }
+    const d = value instanceof Date ? value : new Date(value);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  private dateOnlyToEndOfDay(dateOnly: string): Date {
+    const [y, mo, d] = dateOnly.split('-').map(Number);
+    return new Date(y, mo - 1, d, 23, 59, 59, 999);
+  }
+
+  private async resolveFechaFinForUpdate(
+    torneoId: string,
+    fechaFinInput: string | Date,
+    fechaInicio: Date | null,
+  ): Promise<Date> {
+    const finOnly = this.toDateOnlyString(fechaFinInput);
+    const inicioOnly = fechaInicio
+      ? this.toDateOnlyString(fechaInicio)
+      : null;
+    const todayOnly = this.toDateOnlyString(new Date());
+
+    if (inicioOnly && finOnly < inicioOnly) {
+      throw new BadRequestException(
+        'La fecha de fin no puede ser anterior a la fecha de inicio',
+      );
+    }
+    if (finOnly < todayOnly) {
+      throw new BadRequestException(
+        'La fecha de fin no puede ser anterior a la fecha actual',
+      );
+    }
+
+    const ultimoPartido = await this.prisma.partido.findFirst({
+      where: { torneoId, fecha: { not: null } },
+      orderBy: { fecha: 'desc' },
+      select: { fecha: true },
+    });
+    if (ultimoPartido?.fecha) {
+      const ultimaOnly = this.toDateOnlyString(ultimoPartido.fecha);
+      if (finOnly < ultimaOnly) {
+        throw new BadRequestException(
+          'La fecha de fin no puede ser anterior a la de un partido ya programado',
+        );
+      }
+    }
+
+    return this.dateOnlyToEndOfDay(finOnly);
+  }
+
   async update(id: string, userId: string, dto: UpdateTournamentDto) {
     const torneo = await this.prisma.torneo.findUnique({ where: { id } });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
     await this.checkOrganizador(id, userId);
+
+    if (dto.fechaInicio !== undefined) {
+      throw new BadRequestException(
+        'La fecha de inicio del torneo no se puede modificar',
+      );
+    }
 
     if (torneo.estado === EstadoTorneo.FINALIZADO) {
       throw new ForbiddenException('No se puede editar un torneo finalizado');
@@ -520,45 +582,11 @@ export class TournamentsService {
       const data: Record<string, unknown> = {};
 
       if (dto.fechaFin !== undefined) {
-        const fin = new Date(dto.fechaFin);
-        const inicio = torneo.fechaInicio ? new Date(torneo.fechaInicio) : null;
-        if (inicio) {
-          inicio.setHours(0, 0, 0, 0);
-          const finDay = new Date(fin);
-          finDay.setHours(0, 0, 0, 0);
-          if (finDay < inicio) {
-            throw new BadRequestException(
-              'La fecha de fin no puede ser anterior a la fecha de inicio',
-            );
-          }
-        }
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const finDay = new Date(fin);
-        finDay.setHours(0, 0, 0, 0);
-        if (finDay < today) {
-          throw new BadRequestException(
-            'La fecha de fin no puede ser anterior a la fecha actual',
-          );
-        }
-
-        const ultimoPartido = await this.prisma.partido.findFirst({
-          where: { torneoId: id, fecha: { not: null } },
-          orderBy: { fecha: 'desc' },
-          select: { fecha: true },
-        });
-        if (ultimoPartido?.fecha) {
-          const ultima = new Date(ultimoPartido.fecha);
-          ultima.setHours(0, 0, 0, 0);
-          if (finDay < ultima) {
-            throw new BadRequestException(
-              'La fecha de fin no puede ser anterior a la de un partido ya programado',
-            );
-          }
-        }
-
-        data.fechaFin = fin;
+        data.fechaFin = await this.resolveFechaFinForUpdate(
+          id,
+          dto.fechaFin,
+          torneo.fechaInicio,
+        );
       }
 
       if (Object.keys(data).length === 0) {
@@ -575,20 +603,30 @@ export class TournamentsService {
       return updated;
     }
 
+    const updateData: Record<string, unknown> = {
+      nombre: dto.nombre,
+      descripcion: dto.descripcion,
+      formato: dto.formato,
+      modalidad: dto.modalidad,
+      maxEquipos: dto.maxEquipos,
+      maxJugadoresPorEquipo: dto.maxJugadoresPorEquipo,
+      zona: dto.zona,
+      imagen: dto.imagen,
+    };
+
+    if (dto.fechaFin !== undefined) {
+      updateData.fechaFin = await this.resolveFechaFinForUpdate(
+        id,
+        dto.fechaFin,
+        dto.fechaInicio
+          ? new Date(dto.fechaInicio)
+          : torneo.fechaInicio,
+      );
+    }
+
     const updated = await this.prisma.torneo.update({
       where: { id },
-      data: {
-        nombre: dto.nombre,
-        descripcion: dto.descripcion,
-        formato: dto.formato,
-        modalidad: dto.modalidad,
-        maxEquipos: dto.maxEquipos,
-        maxJugadoresPorEquipo: dto.maxJugadoresPorEquipo,
-        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
-        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
-        zona: dto.zona,
-        imagen: dto.imagen,
-      },
+      data: updateData,
       include: { campos: true },
     });
 
