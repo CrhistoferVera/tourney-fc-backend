@@ -198,16 +198,6 @@ async function main() {
     throw new Error(`Se esperaban 4 equipos creados; se obtuvieron ${equipoIds.length}`);
   }
 
-  const partidos = generarCopa(equipoIds);
-  await prisma.partido.createMany({
-    data: partidos.map((partido, index) => ({
-      ...partido,
-      torneoId: torneo.id,
-      fecha: new Date(Date.UTC(2026, 6, 1 + index * 7)),
-      estado: EstadoPartido.PENDIENTE,
-    })),
-  });
-
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🏆 Seed Copa 4 equipos completado');
   console.log(`   Torneo        : ${TORNEO_NAME}`);

@@ -19,7 +19,7 @@ const prisma = new PrismaClient({ adapter });
 const PASS = 'Password123';
 
 const TORNEO_NAME = 'Copa TourneyFC 8 equipos';
-const ORGANIZADOR = { nombre: 'Carlos Mendoza', email: 'organizador@tourneyfc.com' };
+const ORGANIZADOR = { nombre: 'Organizador Copa 8', email: 'organizador.copa8@tourneyfc.com' };
 
 const EQUIPOS = [
   {
@@ -103,19 +103,6 @@ const EQUIPOS = [
     ],
   },
 ];
-
-function generarCopa(equipos: { id: string }[]) {
-  if (equipos.length !== 8) {
-    throw new Error(`generarCopa espera 8 equipos, recibió ${equipos.length}`);
-  }
-
-  return [
-    { equipoLocalId: equipos[0].id, equipoVisitanteId: equipos[7].id, ronda: 1, fase: 'Cuartos de final' },
-    { equipoLocalId: equipos[1].id, equipoVisitanteId: equipos[6].id, ronda: 1, fase: 'Cuartos de final' },
-    { equipoLocalId: equipos[2].id, equipoVisitanteId: equipos[5].id, ronda: 1, fase: 'Cuartos de final' },
-    { equipoLocalId: equipos[3].id, equipoVisitanteId: equipos[4].id, ronda: 1, fase: 'Cuartos de final' },
-  ];
-}
 
 async function upsertUsuario(email: string, nombre: string) {
   const passwordHash = await bcrypt.hash(PASS, 10);
@@ -238,16 +225,6 @@ async function main() {
   if (equipoIds.length !== 8) {
     throw new Error(`Se esperaban 8 equipos creados; se obtuvieron ${equipoIds.length}`);
   }
-
-  const partidos = generarCopa(equipoIds);
-  await prisma.partido.createMany({
-    data: partidos.map((partido) => ({
-      ...partido,
-      torneoId: torneo.id,
-      fecha: new Date('2026-07-05'),
-      estado: EstadoPartido.PENDIENTE,
-    })),
-  });
 
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🏆 Seed Copa 8 equipos completado');

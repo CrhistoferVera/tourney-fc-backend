@@ -61,13 +61,11 @@ export class TournamentsService {
         estado: EstadoTorneo.BORRADOR,
         campos: dto.campos
           ? {
-              create: dto.campos.map((c) => ({
-                nombre: c.nombre,
-                direccion: c.direccion,
-                latitud: c.latitud,
-                longitud: c.longitud,
-              })),
-            }
+            create: dto.campos.map((c) => ({
+              nombre: c.nombre,
+              direccion: c.direccion,
+            })),
+          }
           : undefined,
         participantes: {
           create: {
@@ -105,7 +103,7 @@ export class TournamentsService {
     if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
 
     const existente = await this.prisma.invitacionPendiente.findFirst({
-      where: { torneoId, email, tipo: TipoInvitacion.STAFF },
+      where: { torneoId, email, tipo: TipoInvitacion.STAFF, estado: EstadoInvitacion.PENDIENTE },
     });
     if (!existente) {
       await this.prisma.invitacionPendiente.create({
@@ -289,21 +287,21 @@ export class TournamentsService {
     // Torneos con invitación STAFF pendiente (aún no confirmados, ej. BORRADOR)
     const invitacionesPendientes = usuario
       ? await this.prisma.invitacionPendiente.findMany({
-          where: {
-            email: usuario.email,
-            tipo: TipoInvitacion.STAFF,
-            estado: EstadoInvitacion.PENDIENTE,
-            torneoId: { not: null },
-          },
-          include: {
-            torneo: {
-              include: {
-                campos: true,
-                _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
-              },
+        where: {
+          email: usuario.email,
+          tipo: TipoInvitacion.STAFF,
+          estado: EstadoInvitacion.PENDIENTE,
+          torneoId: { not: null },
+        },
+        include: {
+          torneo: {
+            include: {
+              campos: true,
+              _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
             },
           },
-        })
+        },
+      })
       : [];
 
     const confirmadosIds = new Set(participaciones.map((p) => p.torneo.id));
@@ -456,8 +454,16 @@ export class TournamentsService {
       }
     }
 
-    // Mantener variable para compatibilidad con el resto del método
-    const inscripcionPendiente = tieneSolicitudPendiente ? { id: 'derived' } : null;
+    const inscripcionPendiente = rolUsuario
+      ? null
+      : await this.prisma.inscripcion.findFirst({
+        where: {
+          torneoId: id,
+          estado: 'PENDIENTE',
+          equipo: { jugadores: { some: { usuarioId: userId } } },
+        },
+        select: { id: true },
+      });
 
     const equiposAprobados = torneo.inscripciones.length;
     const equipos = torneo.inscripciones.map((ins) => ({
@@ -869,11 +875,11 @@ export class TournamentsService {
       }
       const s = mapa.get(ev.jugadorId)!;
       switch (ev.tipo) {
-        case TipoEvento.GOL:           s.goles++;           break;
-        case TipoEvento.ASISTENCIA:    s.asistencias++;     break;
-        case TipoEvento.TARJETA_AMARILLA: s.amarillas++;    break;
-        case TipoEvento.TARJETA_ROJA:  s.rojas++;           break;
-        case TipoEvento.FALTA:         s.faltas++;          break;
+        case TipoEvento.GOL: s.goles++; break;
+        case TipoEvento.ASISTENCIA: s.asistencias++; break;
+        case TipoEvento.TARJETA_AMARILLA: s.amarillas++; break;
+        case TipoEvento.TARJETA_ROJA: s.rojas++; break;
+        case TipoEvento.FALTA: s.faltas++; break;
         case TipoEvento.PENAL_FALLADO: s.penalesFallados++; break;
       }
     }
@@ -883,11 +889,11 @@ export class TournamentsService {
     });
 
     const vals = [...mapa.values()];
-    const totalGoles          = vals.reduce((a, v) => a + v.goles, 0);
-    const totalAmarillas      = vals.reduce((a, v) => a + v.amarillas, 0);
-    const totalRojas          = vals.reduce((a, v) => a + v.rojas, 0);
-    const totalFaltas         = vals.reduce((a, v) => a + v.faltas, 0);
-    const promedioGoles       = totalPartidos === 0 ? 0 : +(totalGoles / totalPartidos).toFixed(2);
+    const totalGoles = vals.reduce((a, v) => a + v.goles, 0);
+    const totalAmarillas = vals.reduce((a, v) => a + v.amarillas, 0);
+    const totalRojas = vals.reduce((a, v) => a + v.rojas, 0);
+    const totalFaltas = vals.reduce((a, v) => a + v.faltas, 0);
+    const promedioGoles = totalPartidos === 0 ? 0 : +(totalGoles / totalPartidos).toFixed(2);
 
     const buildFull = (key: keyof PlayerStats) =>
       [...mapa.entries()]
@@ -902,11 +908,11 @@ export class TournamentsService {
           valor: v[key] as number,
         }));
 
-    const fullGoleadores      = buildFull('goles');
-    const fullAsistentes      = buildFull('asistencias');
-    const fullAmarillas       = buildFull('amarillas');
-    const fullRojas           = buildFull('rojas');
-    const fullFaltas          = buildFull('faltas');
+    const fullGoleadores = buildFull('goles');
+    const fullAsistentes = buildFull('asistencias');
+    const fullAmarillas = buildFull('amarillas');
+    const fullRojas = buildFull('rojas');
+    const fullFaltas = buildFull('faltas');
     const fullPenalesFallados = buildFull('penalesFallados');
 
     const rankOf = (full: { jugadorId: string }[], id: string) => {
@@ -926,17 +932,17 @@ export class TournamentsService {
       const personal = mapa.get(userId);
       if (personal) {
         estadisticasPersonales = {
-          goles:              personal.goles,
-          asistencias:        personal.asistencias,
-          tarjetasAmarillas:  personal.amarillas,
-          tarjetasRojas:      personal.rojas,
-          faltas:             personal.faltas,
-          penalesFallados:    personal.penalesFallados,
-          posicionGoles:          personal.goles > 0          ? rankOf(fullGoleadores, userId)      : null,
-          posicionAsistencias:    personal.asistencias > 0    ? rankOf(fullAsistentes, userId)      : null,
-          posicionAmarillas:      personal.amarillas > 0      ? rankOf(fullAmarillas, userId)       : null,
-          posicionRojas:          personal.rojas > 0          ? rankOf(fullRojas, userId)           : null,
-          posicionFaltas:         personal.faltas > 0         ? rankOf(fullFaltas, userId)          : null,
+          goles: personal.goles,
+          asistencias: personal.asistencias,
+          tarjetasAmarillas: personal.amarillas,
+          tarjetasRojas: personal.rojas,
+          faltas: personal.faltas,
+          penalesFallados: personal.penalesFallados,
+          posicionGoles: personal.goles > 0 ? rankOf(fullGoleadores, userId) : null,
+          posicionAsistencias: personal.asistencias > 0 ? rankOf(fullAsistentes, userId) : null,
+          posicionAmarillas: personal.amarillas > 0 ? rankOf(fullAmarillas, userId) : null,
+          posicionRojas: personal.rojas > 0 ? rankOf(fullRojas, userId) : null,
+          posicionFaltas: personal.faltas > 0 ? rankOf(fullFaltas, userId) : null,
           posicionPenalesFallados: personal.penalesFallados > 0 ? rankOf(fullPenalesFallados, userId) : null,
         };
       } else {
@@ -959,11 +965,11 @@ export class TournamentsService {
         promedioGolesPorPartido: promedioGoles,
         totalFaltas,
       },
-      goleadores:      fullGoleadores.slice(0, 10),
-      asistentes:      fullAsistentes.slice(0, 10),
-      amarillas:       fullAmarillas.slice(0, 10),
-      rojas:           fullRojas.slice(0, 10),
-      faltas:          fullFaltas.slice(0, 10),
+      goleadores: fullGoleadores.slice(0, 10),
+      asistentes: fullAsistentes.slice(0, 10),
+      amarillas: fullAmarillas.slice(0, 10),
+      rojas: fullRojas.slice(0, 10),
+      faltas: fullFaltas.slice(0, 10),
       penalesFallados: fullPenalesFallados.slice(0, 10),
       estadisticasPersonales,
     };
