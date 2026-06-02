@@ -832,11 +832,12 @@ export class TournamentsService {
             TipoEvento.TARJETA_AMARILLA,
             TipoEvento.TARJETA_ROJA,
             TipoEvento.FALTA,
-            TipoEvento.PENAL_FALLADO,
           ],
         },
-        // Los tiros de la tanda de penales no cuentan para las estadísticas de jugador
-        detalle: { not: 'PENAL' },
+        // Los tiros de la tanda de penales (detalle === 'PENAL') no cuentan para las
+        // estadísticas. Se maneja el NULL explícitamente porque en SQL `detalle != 'PENAL'`
+        // no incluye las filas con detalle NULL (los eventos de tiempo regular).
+        OR: [{ detalle: null }, { detalle: { not: 'PENAL' } }],
         jugadorId: { not: null },
       },
       select: {
@@ -856,7 +857,6 @@ export class TournamentsService {
       amarillas: number;
       rojas: number;
       faltas: number;
-      penalesFallados: number;
     };
     const mapa = new Map<string, PlayerStats>();
 
@@ -872,7 +872,6 @@ export class TournamentsService {
           amarillas: 0,
           rojas: 0,
           faltas: 0,
-          penalesFallados: 0,
         });
       }
       const s = mapa.get(ev.jugadorId)!;
@@ -882,7 +881,6 @@ export class TournamentsService {
         case TipoEvento.TARJETA_AMARILLA: s.amarillas++; break;
         case TipoEvento.TARJETA_ROJA: s.rojas++; break;
         case TipoEvento.FALTA: s.faltas++; break;
-        case TipoEvento.PENAL_FALLADO: s.penalesFallados++; break;
       }
     }
 
@@ -915,7 +913,6 @@ export class TournamentsService {
     const fullAmarillas = buildFull('amarillas');
     const fullRojas = buildFull('rojas');
     const fullFaltas = buildFull('faltas');
-    const fullPenalesFallados = buildFull('penalesFallados');
 
     const rankOf = (full: { jugadorId: string }[], id: string) => {
       const idx = full.findIndex((e) => e.jugadorId === id);
@@ -924,10 +921,10 @@ export class TournamentsService {
 
     type EstPersonales = {
       goles: number; asistencias: number; tarjetasAmarillas: number;
-      tarjetasRojas: number; faltas: number; penalesFallados: number;
+      tarjetasRojas: number; faltas: number;
       posicionGoles: number | null; posicionAsistencias: number | null;
       posicionAmarillas: number | null; posicionRojas: number | null;
-      posicionFaltas: number | null; posicionPenalesFallados: number | null;
+      posicionFaltas: number | null;
     };
     let estadisticasPersonales: EstPersonales | null = null;
     if (wantPersonal) {
@@ -939,21 +936,19 @@ export class TournamentsService {
           tarjetasAmarillas: personal.amarillas,
           tarjetasRojas: personal.rojas,
           faltas: personal.faltas,
-          penalesFallados: personal.penalesFallados,
           posicionGoles: personal.goles > 0 ? rankOf(fullGoleadores, userId) : null,
           posicionAsistencias: personal.asistencias > 0 ? rankOf(fullAsistentes, userId) : null,
           posicionAmarillas: personal.amarillas > 0 ? rankOf(fullAmarillas, userId) : null,
           posicionRojas: personal.rojas > 0 ? rankOf(fullRojas, userId) : null,
           posicionFaltas: personal.faltas > 0 ? rankOf(fullFaltas, userId) : null,
-          posicionPenalesFallados: personal.penalesFallados > 0 ? rankOf(fullPenalesFallados, userId) : null,
         };
       } else {
         estadisticasPersonales = {
           goles: 0, asistencias: 0, tarjetasAmarillas: 0,
-          tarjetasRojas: 0, faltas: 0, penalesFallados: 0,
+          tarjetasRojas: 0, faltas: 0,
           posicionGoles: null, posicionAsistencias: null,
           posicionAmarillas: null, posicionRojas: null,
-          posicionFaltas: null, posicionPenalesFallados: null,
+          posicionFaltas: null,
         };
       }
     }
@@ -972,7 +967,6 @@ export class TournamentsService {
       amarillas: fullAmarillas.slice(0, 10),
       rojas: fullRojas.slice(0, 10),
       faltas: fullFaltas.slice(0, 10),
-      penalesFallados: fullPenalesFallados.slice(0, 10),
       estadisticasPersonales,
     };
   }
