@@ -64,6 +64,8 @@ export class TournamentsService {
             create: dto.campos.map((c) => ({
               nombre: c.nombre,
               direccion: c.direccion,
+              latitud: c.latitud,
+              longitud: c.longitud,
             })),
           }
           : undefined,
