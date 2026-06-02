@@ -2,6 +2,7 @@ import {
   IsString,
   IsEnum,
   IsInt,
+  IsNumber,
   IsDateString,
   IsOptional,
   IsArray,
@@ -23,6 +24,16 @@ export class CampoJuegoDto {
   @IsOptional()
   @IsString()
   direccion?: string;
+
+  @ApiProperty({ example: -17.3895, required: false })
+  @IsOptional()
+  @IsNumber()
+  latitud?: number;
+
+  @ApiProperty({ example: -66.1568, required: false })
+  @IsOptional()
+  @IsNumber()
+  longitud?: number;
 }
 
 export class CreateTournamentDto {

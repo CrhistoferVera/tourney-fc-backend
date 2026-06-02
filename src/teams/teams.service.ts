@@ -57,7 +57,12 @@ export class TeamsService {
 
   async getMyTeams(userId: string) {
     const equipos = await this.prisma.equipo.findMany({
-      where: { jugadores: { some: { usuarioId: userId } } },
+      where: {
+        OR: [
+          { jugadores: { some: { usuarioId: userId } } },
+          { capitanId: userId },
+        ],
+      },
       include: { _count: { select: { jugadores: true } } },
       orderBy: { createdAt: 'desc' },
     });

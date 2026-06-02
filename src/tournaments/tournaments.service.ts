@@ -9,22 +9,32 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
-import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego } from '@prisma/client';
-import { Resend } from 'resend';
+import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego, FormatoTorneo } from '@prisma/client';
+import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { MatchesService } from '../matches/matches.service';
 
 @Injectable()
 export class TournamentsService {
   private readonly logger = new Logger(TournamentsService.name);
-  private readonly resend: Resend;
+  private readonly mailer: nodemailer.Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly matchesService: MatchesService,
   ) {
-    this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
+    this.mailer = nodemailer.createTransport({
+      host: this.configService.get<string>('EMAIL_HOST'),
+      port: this.configService.get<number>('EMAIL_PORT'),
+      secure: false,
+      auth: {
+        user: this.configService.get<string>('EMAIL_USER'),
+        pass: this.configService.get<string>('EMAIL_PASS'),
+      },
+    });
   }
 
   async uploadImage(file: Express.Multer.File) {
@@ -194,6 +204,7 @@ export class TournamentsService {
 
     const inscripcion = await this.prisma.inscripcion.findUnique({
       where: { id: inscripcionId },
+      include: { equipo: true, roster: true },
     });
     if (inscripcion?.torneoId !== torneoId)
       throw new NotFoundException('Solicitud no encontrada');
@@ -204,6 +215,20 @@ export class TournamentsService {
       where: { id: inscripcionId },
       data: { estado: accion === 'aprobar' ? 'APROBADA' : 'RECHAZADA' },
     });
+
+    if (accion === 'aprobar') {
+      for (const r of inscripcion.roster) {
+        const rol =
+          r.usuarioId === inscripcion.equipo.capitanId
+            ? RolTorneo.CAPITAN
+            : RolTorneo.JUGADOR;
+        await this.prisma.usuarioTorneo.upsert({
+          where: { usuarioId_torneoId: { usuarioId: r.usuarioId, torneoId } },
+          update: { rol },
+          create: { usuarioId: r.usuarioId, torneoId, rol },
+        });
+      }
+    }
 
     return { mensaje: accion === 'aprobar' ? 'Equipo aprobado' : 'Equipo rechazado' };
   }
@@ -295,7 +320,50 @@ export class TournamentsService {
       zona: p.torneo.zona,
       imagen: p.torneo.imagen,
       rolUsuario: p.rol,
+      tieneSolicitudPendiente: false,
       campos: p.torneo.campos,
+    }));
+
+    // Torneos donde el usuario está en un roster PENDIENTE o APROBADO
+    // pero aún no tiene UsuarioTorneo (roles no asignados — fallback)
+    const inscripcionesRoster = await this.prisma.inscripcion.findMany({
+      where: {
+        estado: { in: ['PENDIENTE', 'APROBADA'] },
+        roster: { some: { usuarioId: userId } },
+        torneoId: { notIn: [...confirmadosIds] },
+      },
+      include: {
+        torneo: {
+          include: {
+            campos: true,
+            _count: { select: { inscripciones: { where: { estado: 'APROBADA' } } } },
+          },
+        },
+        equipo: { select: { capitanId: true } },
+      },
+    });
+
+    const desdeRoster = inscripcionesRoster.map((ins) => ({
+      id: ins.torneo.id,
+      nombre: ins.torneo.nombre,
+      formato: ins.torneo.formato,
+      modalidad: ins.torneo.modalidad,
+      maxJugadoresPorEquipo: ins.torneo.maxJugadoresPorEquipo,
+      estado: ins.torneo.estado,
+      maxEquipos: ins.torneo.maxEquipos,
+      equiposInscritos: ins.torneo._count.inscripciones,
+      fechaInicio: ins.torneo.fechaInicio,
+      fechaFin: ins.torneo.fechaFin,
+      zona: ins.torneo.zona,
+      imagen: ins.torneo.imagen,
+      rolUsuario:
+        ins.estado === 'APROBADA'
+          ? ins.equipo.capitanId === userId
+            ? RolTorneo.CAPITAN
+            : RolTorneo.JUGADOR
+          : null,
+      tieneSolicitudPendiente: ins.estado === 'PENDIENTE',
+      campos: ins.torneo.campos,
     }));
 
     const pendientesStaff = invitacionesPendientes
@@ -322,7 +390,7 @@ export class TournamentsService {
       EN_CURSO: 0, EN_INSCRIPCION: 1, BORRADOR: 2, FINALIZADO: 3,
     };
 
-    return [...confirmados, ...pendientesStaff].sort(
+    return [...confirmados, ...pendientesStaff, ...desdeRoster].sort(
       (a, b) => (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4),
     );
   }
@@ -361,7 +429,30 @@ export class TournamentsService {
     const participacion = torneo.participantes.find(
       (p) => p.usuarioId === userId,
     );
-    const rolUsuario = participacion?.rol ?? null;
+    let rolUsuario: string | null = participacion?.rol ?? null;
+
+    // Fallback: si no hay UsuarioTorneo (roles no asignados), derivar desde el roster
+    let tieneSolicitudPendiente = false;
+    if (!rolUsuario) {
+      const inscripcionDelUsuario = await this.prisma.inscripcion.findFirst({
+        where: {
+          torneoId: id,
+          estado: { in: ['PENDIENTE', 'APROBADA'] },
+          roster: { some: { usuarioId: userId } },
+        },
+        include: { equipo: { select: { capitanId: true } } },
+      });
+      if (inscripcionDelUsuario) {
+        if (inscripcionDelUsuario.estado === 'PENDIENTE') {
+          tieneSolicitudPendiente = true;
+        } else {
+          rolUsuario =
+            inscripcionDelUsuario.equipo.capitanId === userId
+              ? RolTorneo.CAPITAN
+              : RolTorneo.JUGADOR;
+        }
+      }
+    }
 
     const inscripcionPendiente = rolUsuario
       ? null
@@ -381,6 +472,11 @@ export class TournamentsService {
         usuario: r.usuario,
       })),
     }));
+
+    const ganadorTorneo =
+      torneo.estado === EstadoTorneo.FINALIZADO
+        ? await this.matchesService.getGanadorTorneo(id)
+        : null;
 
     return {
       id: torneo.id,
@@ -403,7 +499,64 @@ export class TournamentsService {
       rolUsuario,
       tieneSolicitudPendiente: !!inscripcionPendiente,
       createdAt: torneo.createdAt,
+      ganadorTorneo,
     };
+  }
+
+  private toDateOnlyString(value: string | Date): string {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        return trimmed.slice(0, 10);
+      }
+    }
+    const d = value instanceof Date ? value : new Date(value);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  private dateOnlyToEndOfDay(dateOnly: string): Date {
+    const [y, mo, d] = dateOnly.split('-').map(Number);
+    return new Date(y, mo - 1, d, 23, 59, 59, 999);
+  }
+
+  private async resolveFechaFinForUpdate(
+    torneoId: string,
+    fechaFinInput: string | Date,
+    fechaInicio: Date | null,
+  ): Promise<Date> {
+    const finOnly = this.toDateOnlyString(fechaFinInput);
+    const inicioOnly = fechaInicio
+      ? this.toDateOnlyString(fechaInicio)
+      : null;
+    const todayOnly = this.toDateOnlyString(new Date());
+
+    if (inicioOnly && finOnly < inicioOnly) {
+      throw new BadRequestException(
+        'La fecha de fin no puede ser anterior a la fecha de inicio',
+      );
+    }
+    if (finOnly < todayOnly) {
+      throw new BadRequestException(
+        'La fecha de fin no puede ser anterior a la fecha actual',
+      );
+    }
+
+    const ultimoPartido = await this.prisma.partido.findFirst({
+      where: { torneoId, fecha: { not: null } },
+      orderBy: { fecha: 'desc' },
+      select: { fecha: true },
+    });
+    if (ultimoPartido?.fecha) {
+      const ultimaOnly = this.toDateOnlyString(ultimoPartido.fecha);
+      if (finOnly < ultimaOnly) {
+        throw new BadRequestException(
+          'La fecha de fin no puede ser anterior a la de un partido ya programado',
+        );
+      }
+    }
+
+    return this.dateOnlyToEndOfDay(finOnly);
   }
 
   async update(id: string, userId: string, dto: UpdateTournamentDto) {
@@ -412,29 +565,74 @@ export class TournamentsService {
 
     await this.checkOrganizador(id, userId);
 
-    if (
-      torneo.estado === EstadoTorneo.EN_CURSO ||
-      torneo.estado === EstadoTorneo.FINALIZADO
-    ) {
-      throw new ForbiddenException(
-        'No se puede editar un torneo en curso o finalizado',
+    if (dto.fechaInicio !== undefined) {
+      throw new BadRequestException(
+        'La fecha de inicio del torneo no se puede modificar',
+      );
+    }
+
+    if (torneo.estado === EstadoTorneo.FINALIZADO) {
+      throw new ForbiddenException('No se puede editar un torneo finalizado');
+    }
+
+    if (torneo.estado === EstadoTorneo.EN_CURSO) {
+      const disallowed = (
+        ['nombre', 'descripcion', 'formato', 'modalidad', 'maxJugadoresPorEquipo', 'maxEquipos', 'fechaInicio', 'zona', 'imagen'] as const
+      ).filter((key) => dto[key] !== undefined);
+      if (disallowed.length > 0) {
+        throw new ForbiddenException(
+          'Con el torneo en curso solo puedes modificar la fecha de fin',
+        );
+      }
+
+      const data: Record<string, unknown> = {};
+
+      if (dto.fechaFin !== undefined) {
+        data.fechaFin = await this.resolveFechaFinForUpdate(
+          id,
+          dto.fechaFin,
+          torneo.fechaInicio,
+        );
+      }
+
+      if (Object.keys(data).length === 0) {
+        throw new BadRequestException('No hay cambios para guardar');
+      }
+
+      const updated = await this.prisma.torneo.update({
+        where: { id },
+        data,
+        include: { campos: true },
+      });
+
+      this.logger.log(`Torneo en curso actualizado: ${id}`);
+      return updated;
+    }
+
+    const updateData: Record<string, unknown> = {
+      nombre: dto.nombre,
+      descripcion: dto.descripcion,
+      formato: dto.formato,
+      modalidad: dto.modalidad,
+      maxEquipos: dto.maxEquipos,
+      maxJugadoresPorEquipo: dto.maxJugadoresPorEquipo,
+      zona: dto.zona,
+      imagen: dto.imagen,
+    };
+
+    if (dto.fechaFin !== undefined) {
+      updateData.fechaFin = await this.resolveFechaFinForUpdate(
+        id,
+        dto.fechaFin,
+        dto.fechaInicio
+          ? new Date(dto.fechaInicio)
+          : torneo.fechaInicio,
       );
     }
 
     const updated = await this.prisma.torneo.update({
       where: { id },
-      data: {
-        nombre: dto.nombre,
-        descripcion: dto.descripcion,
-        formato: dto.formato,
-        modalidad: dto.modalidad,
-        maxEquipos: dto.maxEquipos,
-        maxJugadoresPorEquipo: dto.maxJugadoresPorEquipo,
-        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
-        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
-        zona: dto.zona,
-        imagen: dto.imagen,
-      },
+      data: updateData,
       include: { campos: true },
     });
 
@@ -489,8 +687,8 @@ export class TournamentsService {
         });
 
         try {
-          await this.resend.emails.send({
-            from: this.configService.get<string>('RESEND_FROM')!,
+          await this.mailer.sendMail({
+            from: this.configService.get<string>('EMAIL_FROM'),
             to: invitacion.email,
             subject: `Eres Staff en ${torneo.nombre} - TourneyFC`,
             html: `
@@ -583,7 +781,11 @@ export class TournamentsService {
     }
   }
 
-  async addCampo(torneoId: string, userId: string, dto: { nombre: string; direccion?: string }) {
+  async addCampo(
+    torneoId: string,
+    userId: string,
+    dto: { nombre: string; direccion?: string; latitud?: number; longitud?: number },
+  ) {
     const torneo = await this.prisma.torneo.findUnique({ where: { id: torneoId } });
     if (!torneo) throw new NotFoundException('Torneo no encontrado');
 
@@ -598,6 +800,8 @@ export class TournamentsService {
         torneoId,
         nombre: dto.nombre,
         direccion: dto.direccion,
+        latitud: dto.latitud,
+        longitud: dto.longitud,
       },
     });
   }
@@ -605,7 +809,7 @@ export class TournamentsService {
   async getCampos(torneoId: string) {
     return this.prisma.campoJuego.findMany({
       where: { torneoId },
-      select: { id: true, nombre: true, direccion: true },
+      select: { id: true, nombre: true, direccion: true, latitud: true, longitud: true },
       orderBy: { nombre: 'asc' },
     });
   }
