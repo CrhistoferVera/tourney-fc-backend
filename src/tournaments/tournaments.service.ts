@@ -835,6 +835,8 @@ export class TournamentsService {
             TipoEvento.PENAL_FALLADO,
           ],
         },
+        // Los tiros de la tanda de penales no cuentan para las estadísticas de jugador
+        detalle: { not: 'PENAL' },
         jugadorId: { not: null },
       },
       select: {

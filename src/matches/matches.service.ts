@@ -499,44 +499,33 @@ export class MatchesService {
       throw new BadRequestException('No se pueden registrar eventos en un partido finalizado');
     }
 
-    // Validaciones específicas para tanda de penales
-    const isPenal = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL' || dto.tipo === TipoEvento.PENAL_FALLADO;
+    // Validaciones específicas para tanda de penales.
+    // La fase del partido es la fuente autoritativa: solo estando en PENALES se aplican
+    // las reglas de tanda (alternancia y rotación de pateadores).
+    const isPenal = partido.faseJuego === FaseJuego.PENALES;
     if (isPenal) {
-      if (partido.faseJuego === FaseJuego.PENALES && !dto.jugadorId) {
+      if (!dto.jugadorId) {
         throw new BadRequestException('Se requiere asignar un jugador para el penal.');
       }
 
-      // Obtener todos los eventos de penal de la tanda de este partido
-      const events = await this.prisma.eventoPartido.findMany({
-        where: {
-          partidoId,
-          OR: [
-            { tipo: TipoEvento.PENAL_FALLADO },
-            { tipo: TipoEvento.GOL, detalle: 'PENAL' },
-            {
-              partido: { faseJuego: FaseJuego.PENALES }
-            }
-          ],
-        },
+      // Obtener todos los tiros de la tanda de este partido (marcados con detalle === 'PENAL')
+      const penaltyEvents = await this.prisma.eventoPartido.findMany({
+        where: { partidoId, detalle: 'PENAL' },
         orderBy: { createdAt: 'asc' },
       });
 
-      const penaltyEvents = events.filter(ev => 
-        ev.detalle === 'PENAL' || 
-        ev.tipo === TipoEvento.PENAL_FALLADO ||
-        ev.minuto === null || 
-        ev.minuto === undefined
-      );
-
-      // 1. Validar alternancia: par -> Local, impar -> Visitante
+      // 1. Validar alternancia. El primer penal puede patearlo cualquier equipo;
+      // a partir de ahí los turnos se alternan respecto a quien inició la tanda.
       const K = penaltyEvents.length;
-      if (K % 2 === 0) {
-        if (dto.equipoId !== partido.equipoLocalId) {
-          throw new BadRequestException('Es el turno del equipo local para patear.');
-        }
-      } else {
-        if (dto.equipoId !== partido.equipoVisitanteId) {
-          throw new BadRequestException('Es el turno del equipo visitante para patear.');
+      if (K > 0) {
+        const firstTeamId = penaltyEvents[0].equipoId;
+        const otherTeamId =
+          firstTeamId === partido.equipoLocalId
+            ? partido.equipoVisitanteId
+            : partido.equipoLocalId;
+        const expectedTeamId = K % 2 === 0 ? firstTeamId : otherTeamId;
+        if (dto.equipoId !== expectedTeamId) {
+          throw new BadRequestException('No es el turno de este equipo para patear.');
         }
       }
 
@@ -571,8 +560,11 @@ export class MatchesService {
         tipo: dto.tipo,
         equipoId: dto.equipoId,
         jugadorId: dto.jugadorId,
-        minuto: dto.minuto,
-        detalle: dto.detalle,
+        // En la tanda el servidor marca el evento de forma autoritativa: detalle 'PENAL'
+        // y sin minuto. Así detalle === 'PENAL' identifica de forma fiable los tiros de tanda
+        // sin confundirlos con penales fallados del tiempo regular.
+        minuto: isPenal ? null : dto.minuto,
+        detalle: isPenal ? 'PENAL' : dto.detalle,
       },
       include: {
         jugador: { select: { id: true, nombre: true } },
@@ -580,10 +572,9 @@ export class MatchesService {
       }
     });
 
-    // Actualizar goles si es GOL regular
+    // Actualizar goles si es GOL regular (los goles de tanda no suman al marcador normal)
     if (dto.tipo === TipoEvento.GOL) {
-      const isPenalEvent = partido.faseJuego === FaseJuego.PENALES || dto.detalle === 'PENAL';
-      if (!isPenalEvent) {
+      if (!isPenal) {
         if (dto.equipoId === partido.equipoLocalId) {
           await this.prisma.partido.update({
             where: { id: partidoId },
@@ -693,9 +684,9 @@ export class MatchesService {
       }
     }
 
-    // Revertir gol si fue GOL y no penal
+    // Revertir gol si fue GOL de tiempo regular (los de tanda van marcados con detalle 'PENAL')
     if (evento.tipo === TipoEvento.GOL) {
-      const isPenalEvent = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL';
+      const isPenalEvent = evento.detalle === 'PENAL';
       if (!isPenalEvent) {
         if (evento.equipoId === partido.equipoLocalId) {
           await this.prisma.partido.update({
@@ -738,8 +729,8 @@ export class MatchesService {
       }
     }
 
-    const isPenal = partido.faseJuego === FaseJuego.PENALES || evento.detalle === 'PENAL' || evento.tipo === TipoEvento.PENAL_FALLADO;
-    if (isPenal) {
+    // Solo recalcular la tanda si el evento borrado era un tiro de tanda
+    if (evento.detalle === 'PENAL') {
       await this.updatePenaltyShootoutState(partidoId);
     }
 
@@ -1143,26 +1134,11 @@ export class MatchesService {
     });
     if (!partido) return;
 
-    const events = await this.prisma.eventoPartido.findMany({
-      where: {
-        partidoId,
-        OR: [
-          { tipo: TipoEvento.PENAL_FALLADO },
-          { tipo: TipoEvento.GOL, detalle: 'PENAL' },
-          {
-            partido: { faseJuego: FaseJuego.PENALES }
-          }
-        ],
-      },
+    // Los tiros de la tanda se identifican de forma fiable por detalle === 'PENAL'
+    const penaltyEvents = await this.prisma.eventoPartido.findMany({
+      where: { partidoId, detalle: 'PENAL' },
       orderBy: { createdAt: 'asc' },
     });
-
-    const penaltyEvents = events.filter(ev => 
-      ev.detalle === 'PENAL' || 
-      ev.tipo === TipoEvento.PENAL_FALLADO ||
-      ev.minuto === null || 
-      ev.minuto === undefined
-    );
 
     const localShots = penaltyEvents.filter(ev => ev.equipoId === partido.equipoLocalId);
     const visitanteShots = penaltyEvents.filter(ev => ev.equipoId === partido.equipoVisitanteId);
