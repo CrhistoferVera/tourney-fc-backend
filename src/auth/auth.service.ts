@@ -87,7 +87,7 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException(
-        'Correo electrónico o contraseña incorrectos. Por favor, intente nuevamente',
+        'Este correo electrónico no está registrado. Por favor, cree una cuenta',
       );
     }
 
