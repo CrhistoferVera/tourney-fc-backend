@@ -221,14 +221,15 @@ describe('UsersService', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([
           {
-            id: 'partido-1',
+            id: 'p-3',
+            faseJuego: 'FINALIZADO',
+            estado: 'CONFIRMADO',
+            fecha: new Date('2026-06-01T10:00:00Z'),
+            campo: { nombre: 'Cancha Central' },
             equipoLocal: { nombre: 'Equipo A' },
             equipoVisitante: { nombre: 'Equipo B' },
             golesLocal: 2,
             golesVisitante: 1,
-            fecha: new Date('2026-04-20T15:00:00Z'),
-            campo: { nombre: 'Cancha Central' },
-            estado: 'CONFIRMADO',
           },
         ]),
       };
