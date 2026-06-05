@@ -13,6 +13,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  // El objeto devuelto aquí se convierte en req.user en cada endpoint protegido.
+  // Los controladores acceden al userId como req.user.id.
   async validate(payload: { sub: string; email: string }) {
     return { id: payload.sub, email: payload.email };
   }

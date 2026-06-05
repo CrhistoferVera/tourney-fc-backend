@@ -317,6 +317,10 @@ export class MatchesService {
 
   // ---- Control de Partido en Vivo ----
 
+  // Maneja las transiciones de fase del partido: PREVIA → PRIMER_TIEMPO → MEDIO_TIEMPO
+  // → SEGUNDO_TIEMPO → (PENALES) → FINALIZADO.
+  // En copa, si el partido termina empatado al llamar END_MATCH, se redirige automáticamente
+  // a PENALES en lugar de finalizar.
   async controlLiveMatch(partidoId: string, userId: string, dto: MatchControlDto) {
     const partido = await this.prisma.partido.findUnique({
       where: { id: partidoId },
@@ -345,7 +349,7 @@ export class MatchesService {
       if (partido.golesVisitante === null) data.golesVisitante = 0;
     } else if (dto.action === MatchControlAction.PAUSE_HALF_TIME) {
       data.faseJuego = FaseJuego.MEDIO_TIEMPO;
-      // Guardar el tiempo jugado hasta el momento
+      // Acumular minutos jugados antes de pausar el cronómetro
       if (partido.cronometroIniciadoEn) {
         const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
         data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
@@ -355,9 +359,10 @@ export class MatchesService {
       data.faseJuego = FaseJuego.SEGUNDO_TIEMPO;
       data.cronometroIniciadoEn = now;
       data.finalizadoEn = null;
-      
-      // Reiniciar minutosJugados al límite reglamentario del primer tiempo
-      let limit = 25; // default FUTBOL_5 y FUTBOL_7
+
+      // Al arrancar el segundo tiempo el contador arranca desde el límite del primero
+      // para que el cronómetro muestre minutos globales correctos (ej. 45' en F11)
+      let limit = 25; // FUTBOL_5 y FUTBOL_7
       if (partido.torneo.modalidad === 'FUTBOL_11') limit = 45;
       data.minutosJugados = limit;
     } else if (dto.action === MatchControlAction.START_PENALTIES) {
@@ -372,13 +377,13 @@ export class MatchesService {
       const currentGolesVisitante = partido.golesVisitante ?? 0;
       const isEmpate = currentGolesLocal === currentGolesVisitante;
 
-      // Calculamos tiempo total si el cronómetro estaba iniciado
       if (partido.cronometroIniciadoEn) {
         const diffMs = now.getTime() - partido.cronometroIniciadoEn.getTime();
         data.minutosJugados = partido.minutosJugados + Math.floor(diffMs / 60000);
       }
       data.cronometroIniciadoEn = null;
 
+      // Copa empatada al terminar tiempo regular → forzar a penales en vez de finalizar
       if (isCopa && isEmpate && partido.faseJuego !== FaseJuego.PENALES) {
         data.faseJuego = FaseJuego.PENALES;
         data.estado = EstadoPartido.EN_CURSO;
@@ -387,6 +392,8 @@ export class MatchesService {
       } else {
         data.faseJuego = FaseJuego.FINALIZADO;
         data.finalizadoEn = now;
+        // En Liga el partido pasa a CONFIRMADO directamente; en Copa queda EN_DISPUTA
+        // hasta que syncCopaBracket procese al ganador y arme la siguiente ronda.
         data.estado =
           partido.torneo.formato === FormatoTorneo.LIGA
             ? EstadoPartido.CONFIRMADO
@@ -803,11 +810,15 @@ export class MatchesService {
     return sorted[0] ? { nombre: sorted[0].nombre, escudo: sorted[0].escudo } : null;
   }
 
+  // Buffer mínimo entre partidos en la misma cancha: F5/F7 = 75 min, F11 = 120 min
   private getCampoBufferMs(modalidad: string): number {
     const diffMinutes = modalidad === 'FUTBOL_11' ? 120 : 75;
     return diffMinutes * 60 * 1000;
   }
 
+  // Evalúa si programar un partido a targetMs generaría conflicto con otro partido
+  // en la misma cancha. El caso FINALIZADO usa finalizadoEn como referencia real de cuándo
+  // quedó libre la cancha; EN_CURSO usa Date.now() porque no sabe cuándo termina.
   private partidoCampoHorarioConflicto(
     targetMs: number,
     otro: {
@@ -927,6 +938,11 @@ export class MatchesService {
     return `Ronda de ${matchesInRoundCount}`;
   }
 
+  // Avanza el cuadro de copa: cuando dos partidos de la misma ronda están finalizados,
+  // toma a sus ganadores y crea (o actualiza) el partido de la siguiente ronda.
+  // Se procesa por pares: los partidos 0-1 alimentan el partido 0 de la ronda siguiente,
+  // los partidos 2-3 alimentan el partido 1, y así sucesivamente.
+  // Lleva el orden por createdAt para mantener consistencia con findAll.
   async syncCopaBracket(torneoId: string): Promise<void> {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id: torneoId },
@@ -955,17 +971,19 @@ export class MatchesService {
     const roundNums = [...byRound.keys()].sort((a, b) => a - b);
     for (const ronda of roundNums) {
       const matchesInRound = byRound.get(ronda)!;
+      // Recorrer de dos en dos: cada par de partidos produce uno en la ronda siguiente
       for (let mIndex = 0; mIndex < matchesInRound.length; mIndex += 2) {
         const m1 = matchesInRound[mIndex];
         const m2 = matchesInRound[mIndex + 1];
         if (!m1 || !m2) continue;
+        // Esperar a que ambos estén finalizados antes de armar el siguiente cruce
         if (!this.isCopaMatchFinished(m1) || !this.isCopaMatchFinished(m2)) {
           continue;
         }
 
         const localWinnerId = this.getCopaWinnerId(m1);
         const visitanteWinnerId = this.getCopaWinnerId(m2);
-        
+
         if (!localWinnerId || !visitanteWinnerId) {
           continue;
         }
@@ -976,6 +994,7 @@ export class MatchesService {
 
         const nextRound = ronda + 1;
         const nextMatchIndex = Math.floor(mIndex / 2);
+        // El label de la siguiente ronda se calcula a partir de cuántos partidos hay en la actual
         const nextFaseLabel = this.getCopaFaseLabel(matchesInRound.length);
 
         const matchesInNextRound = await this.prisma.partido.findMany({
@@ -984,6 +1003,7 @@ export class MatchesService {
         });
 
         if (matchesInNextRound.length > nextMatchIndex) {
+          // El partido ya existe (fue creado en una sincronización anterior); actualizar equipos si cambiaron
           const existing = matchesInNextRound[nextMatchIndex];
           if (
             existing.equipoLocalId !== realLocalId ||
@@ -1127,6 +1147,14 @@ export class MatchesService {
     return ganadorTorneo;
   }
 
+  // Recalcula el estado de la tanda de penales después de cada tiro registrado o eliminado.
+  // Detecta automáticamente si la tanda terminó (ganador matemáticamente definido o
+  // todos los tiros completados) y finaliza el partido sin intervención manual.
+  //
+  // Lógica de finalización anticipada (< 5 tiros por equipo):
+  //   - Si un equipo ya no puede alcanzar al otro con los tiros restantes, termina.
+  // Muerte súbita (> 5 tiros): la tanda continúa hasta que haya diferencia
+  //   al completar los tiros de cada ronda adicional.
   async updatePenaltyShootoutState(partidoId: string) {
     const partido = await this.prisma.partido.findUnique({
       where: { id: partidoId },
@@ -1134,7 +1162,6 @@ export class MatchesService {
     });
     if (!partido) return;
 
-    // Los tiros de la tanda se identifican de forma fiable por detalle === 'PENAL'
     const penaltyEvents = await this.prisma.eventoPartido.findMany({
       where: { partidoId, detalle: 'PENAL' },
       orderBy: { createdAt: 'asc' },
@@ -1152,24 +1179,29 @@ export class MatchesService {
     let winnerId: string | null = null;
 
     if (kicksLocal <= 5 && kicksVisitante <= 5) {
+      // Tiros restantes posibles para cada equipo
       const remLocal = 5 - kicksLocal;
       const remVisitante = 5 - kicksVisitante;
       const maxLocal = golesLocal + remLocal;
       const maxVisitante = golesVisitante + remVisitante;
 
       if (golesLocal > maxVisitante) {
+        // El local ya ganó, el visitante no puede alcanzarlo
         finished = true;
         winnerId = partido.equipoLocalId;
       } else if (golesVisitante > maxLocal) {
         finished = true;
         winnerId = partido.equipoVisitanteId;
       } else if (kicksLocal === 5 && kicksVisitante === 5) {
+        // Ambos completaron los 5 tiros — definir por diferencia
         if (golesLocal !== golesVisitante) {
           finished = true;
           winnerId = golesLocal > golesVisitante ? partido.equipoLocalId : partido.equipoVisitanteId;
         }
       }
     } else {
+      // Muerte súbita: finalizar cuando ambos completaron la misma cantidad de tiros
+      // y hay diferencia en goles
       if (kicksLocal === kicksVisitante) {
         if (golesLocal !== golesVisitante) {
           finished = true;

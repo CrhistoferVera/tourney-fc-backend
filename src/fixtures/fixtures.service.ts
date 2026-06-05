@@ -18,6 +18,9 @@ export class FixturesService {
     private readonly matchesService: MatchesService,
   ) {}
 
+  // Genera el fixture completo del torneo. Solo válido cuando está EN_INSCRIPCION
+  // y tiene el cupo completo de equipos aprobados. Si ya existían partidos, los borra
+  // y regenera desde cero para evitar inconsistencias.
   async generate(torneoId: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id: torneoId },
@@ -41,6 +44,7 @@ export class FixturesService {
 
     const equipos = torneo.inscripciones.map((ins) => ({ id: ins.equipo.id }));
 
+    // Exigir cupo completo antes de generar; un fixture con huecos no tiene sentido
     if (equipos.length < torneo.maxEquipos) {
       throw new BadRequestException(
         `Se necesitan ${torneo.maxEquipos} equipos para generar el fixture. Actualmente hay ${equipos.length}.`,
@@ -56,6 +60,7 @@ export class FixturesService {
         ? this.generarLiga(equipos)
         : this.generarCopa(equipos);
 
+    // Los partidos se crean sin fecha; el organizador/staff los programa después
     const partidosSinFecha = partidos.map((p) => ({
       ...p,
       torneoId,
@@ -186,6 +191,8 @@ export class FixturesService {
       },
     });
 
+    // Aplica el resultado de un partido a la fila del equipo:
+    // victoria = 3 pts, empate = 1 pt, derrota = 0 pts
     const aplicarResultado = (
       equipoId: string,
       golesFavor: number,
@@ -221,6 +228,7 @@ export class FixturesService {
       );
     }
 
+    // Criterios de desempate en orden: pts > DG > GF > GC (menor es mejor) > nombre A-Z
     const tabla = [...filas.values()]
       .sort(
         (a, b) =>
@@ -266,7 +274,10 @@ export class FixturesService {
     });
   }
 
-  // Algoritmo Liga — todos contra todos
+  // Algoritmo Liga — todos contra todos (Round-Robin).
+  // Usa el método del polígono: el primer equipo queda fijo y el resto rota
+  // en sentido antihorario cada ronda. Con N equipos genera N-1 fechas.
+  // Si N es impar se agrega un BYE para completar el ciclo.
   private generarLiga(equipos: { id: string }[]) {
     const partidos: {
       equipoLocalId: string;
@@ -277,7 +288,6 @@ export class FixturesService {
     const n = equipos.length;
     const lista = [...equipos];
 
-    // Si número impar, agregar bye
     if (n % 2 !== 0) lista.push({ id: 'BYE' });
 
     const totalRondas = lista.length - 1;
@@ -296,14 +306,18 @@ export class FixturesService {
           });
         }
       }
-      // Rotar equipos (el primero fijo)
+      // Rotar equipos (el primero fijo, el último pasa al índice 1)
       lista.splice(1, 0, lista.pop()!);
     }
 
     return partidos;
   }
 
-  // Algoritmo Copa — eliminación directa
+  // Algoritmo Copa — eliminación directa.
+  // Solo genera la primera ronda con emparejamientos aleatorios. Las rondas
+  // siguientes las crea syncCopaBracket a medida que se van cerrando partidos.
+  // El cuadro se rellena a la siguiente potencia de 2 con BYEs para que
+  // el bracket quede simétrico.
   private generarCopa(equipos: { id: string }[]) {
     const partidos: {
       equipoLocalId: string;
@@ -313,7 +327,6 @@ export class FixturesService {
     }[] = [];
     const shuffled = [...equipos].sort(() => Math.random() - 0.5);
 
-    // Rellenar con BYE si no es potencia de 2
     const nextPow2 = Math.pow(2, Math.ceil(Math.log2(shuffled.length)));
     while (shuffled.length < nextPow2) shuffled.push({ id: 'BYE' });
 
@@ -334,8 +347,8 @@ export class FixturesService {
           });
         }
       }
-      // En Copa real, la siguiente ronda depende de los ganadores
-      // Por ahora solo generamos la primera ronda completa
+      // La siguiente ronda depende de los ganadores reales; no se puede
+      // pre-generar. syncCopaBracket se encarga de crear esos partidos.
       break;
     }
 

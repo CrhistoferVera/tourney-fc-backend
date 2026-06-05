@@ -270,6 +270,11 @@ export class TournamentsService {
     }));
   }
 
+  // Devuelve todos los torneos relevantes para el usuario, unificando tres fuentes:
+  // 1. Torneos donde ya tiene rol asignado en UsuarioTorneo (confirmados).
+  // 2. Torneos con invitación STAFF pendiente (aún no aceptadas, ej. torneo en BORRADOR).
+  // 3. Torneos donde está en el roster de una inscripción pero sin UsuarioTorneo todavía.
+  // La unión evita duplicados y los ordena por estado de actividad del torneo.
   async findMy(userId: string) {
     const usuario = await this.prisma.usuario.findUnique({ where: { id: userId } });
 
@@ -388,6 +393,7 @@ export class TournamentsService {
         campos: i.torneo.campos,
       }));
 
+    // Prioridad visual: los activos primero, los finalizados al final
     const orden: Record<string, number> = {
       EN_CURSO: 0, EN_INSCRIPCION: 1, BORRADOR: 2, FINALIZADO: 3,
     };
@@ -433,7 +439,8 @@ export class TournamentsService {
     );
     let rolUsuario: string | null = participacion?.rol ?? null;
 
-    // Fallback: si no hay UsuarioTorneo (roles no asignados), derivar desde el roster
+    // Los jugadores/capitanes no tienen UsuarioTorneo hasta que se aprueba su inscripción.
+    // Si no hay registro en participantes, se deriva el rol desde el roster de la inscripción.
     let tieneSolicitudPendiente = false;
     if (!rolUsuario) {
       const inscripcionDelUsuario = await this.prisma.inscripcion.findFirst({
@@ -505,6 +512,8 @@ export class TournamentsService {
     };
   }
 
+  // Normaliza cualquier valor de fecha a 'YYYY-MM-DD' para comparaciones de solo-fecha,
+  // sin depender de la zona horaria del servidor (evita el off-by-one de UTC vs local).
   private toDateOnlyString(value: string | Date): string {
     if (typeof value === 'string') {
       const trimmed = value.trim();
@@ -517,11 +526,15 @@ export class TournamentsService {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
+  // La fecha de fin del torneo se guarda como el último milisegundo del día para que
+  // los partidos programados a cualquier hora de ese día sean válidos.
   private dateOnlyToEndOfDay(dateOnly: string): Date {
     const [y, mo, d] = dateOnly.split('-').map(Number);
     return new Date(y, mo - 1, d, 23, 59, 59, 999);
   }
 
+  // Valida y normaliza la nueva fecha de fin: no puede ser anterior al inicio,
+  // a hoy, ni a la fecha del último partido ya programado del torneo.
   private async resolveFechaFinForUpdate(
     torneoId: string,
     fechaFinInput: string | Date,
@@ -648,6 +661,9 @@ export class TournamentsService {
     return updated;
   }
 
+  // Al publicar un torneo (BORRADOR → EN_INSCRIPCION), se materializan automáticamente
+  // todas las invitaciones STAFF pendientes: se crea el UsuarioTorneo con rol STAFF,
+  // se marca la invitación como ACEPTADA y se notifica por correo.
   async publish(id: string, userId: string) {
     const torneo = await this.prisma.torneo.findUnique({
       where: { id },
