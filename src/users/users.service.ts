@@ -163,6 +163,7 @@ export class UsersService {
               equipoLocal: { select: { nombre: true } },
               equipoVisitante: { select: { nombre: true } },
               campo: { select: { nombre: true, direccion: true } },
+              torneo: { select: { formato: true } },
             },
           })
         : null;
@@ -175,6 +176,8 @@ export class UsersService {
           direccion: proximoPartido.campo?.direccion ?? null,
           equipoLocal: proximoPartido.equipoLocal.nombre,
           equipoVisitante: proximoPartido.equipoVisitante.nombre,
+          fase: proximoPartido.fase,
+          formato: proximoPartido.torneo?.formato,
         }
       : null;
 
