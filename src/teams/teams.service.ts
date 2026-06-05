@@ -204,6 +204,39 @@ export class TeamsService {
     return { mensaje: 'Has salido del equipo' };
   }
 
+  async removePlayer(equipoId: string, capitanId: string, targetUserId: string) {
+    const equipo = await this.requireCapitan(equipoId, capitanId);
+
+    if (targetUserId === capitanId) {
+      throw new BadRequestException('No puedes eliminarte a ti mismo del equipo');
+    }
+
+    const miembro = await this.prisma.usuarioEquipo.findUnique({
+      where: { usuarioId_equipoId: { usuarioId: targetUserId, equipoId } },
+    });
+    if (!miembro) throw new NotFoundException('El usuario no es miembro del equipo');
+
+    const enRosterActivo = await this.prisma.inscripcionRoster.findFirst({
+      where: {
+        usuarioId: targetUserId,
+        inscripcion: {
+          equipoId,
+          estado: 'APROBADA',
+          torneo: { estado: EstadoTorneo.EN_CURSO },
+        },
+      },
+    });
+    if (enRosterActivo) {
+      throw new BadRequestException(
+        'No puedes eliminar a este jugador: está en el roster de un torneo en curso.',
+      );
+    }
+
+    await this.prisma.usuarioEquipo.delete({ where: { id: miembro.id } });
+    this.logger.log(`Capitán ${capitanId} eliminó al usuario ${targetUserId} del equipo ${equipoId}`);
+    return { mensaje: 'Jugador eliminado del equipo' };
+  }
+
   // ─── Invitación por correo ─────────────────────────────────────────────────
 
   async invitePlayer(equipoId: string, userId: string, email: string) {

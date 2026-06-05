@@ -141,6 +141,14 @@ export class TeamsController {
     return this.teamsService.leaveTeam(id, req.user.id);
   }
 
+  @Delete(':id/members/:userId')
+  @ApiOperation({ summary: 'Eliminar jugador del equipo — solo capitán' })
+  @ApiParam({ name: 'id', description: 'UUID del equipo' })
+  @ApiParam({ name: 'userId', description: 'UUID del jugador a eliminar' })
+  removePlayer(@Param('id') id: string, @Param('userId') targetUserId: string, @Request() req: any) {
+    return this.teamsService.removePlayer(id, req.user.id, targetUserId);
+  }
+
   @Post(':id/invite-player')
   @ApiOperation({ summary: 'Invitar jugador por correo — solo capitán' })
   @ApiParam({ name: 'id', description: 'UUID del equipo' })

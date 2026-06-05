@@ -213,6 +213,21 @@ export class TournamentsService {
     if (inscripcion.estado !== 'PENDIENTE')
       throw new BadRequestException('Esta solicitud ya fue respondida');
 
+    if (accion === 'aprobar') {
+      const torneoInfo = await this.prisma.torneo.findUnique({
+        where: { id: torneoId },
+        select: { maxEquipos: true },
+      });
+      if (torneoInfo) {
+        const aprobados = await this.prisma.inscripcion.count({
+          where: { torneoId, estado: 'APROBADA' },
+        });
+        if (aprobados >= torneoInfo.maxEquipos) {
+          throw new BadRequestException('El torneo ya ha alcanzado el límite máximo de equipos.');
+        }
+      }
+    }
+
     await this.prisma.inscripcion.update({
       where: { id: inscripcionId },
       data: { estado: accion === 'aprobar' ? 'APROBADA' : 'RECHAZADA' },
@@ -617,6 +632,15 @@ export class TournamentsService {
 
       this.logger.log(`Torneo en curso actualizado: ${id}`);
       return updated;
+    }
+
+    if (dto.maxEquipos !== undefined && torneo.estado !== EstadoTorneo.BORRADOR) {
+      const aprobados = await this.prisma.inscripcion.count({
+        where: { torneoId: id, estado: 'APROBADA' },
+      });
+      if (dto.maxEquipos < aprobados) {
+        throw new BadRequestException(`No puedes reducir los cupos a ${dto.maxEquipos}. Ya hay ${aprobados} equipos inscritos.`);
+      }
     }
 
     const updateData: Record<string, unknown> = {
