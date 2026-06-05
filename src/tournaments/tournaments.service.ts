@@ -580,11 +580,6 @@ export class TournamentsService {
 
     await this.checkOrganizador(id, userId);
 
-    if (dto.fechaInicio !== undefined) {
-      throw new BadRequestException(
-        'La fecha de inicio del torneo no se puede modificar',
-      );
-    }
 
     if (torneo.estado === EstadoTorneo.FINALIZADO) {
       throw new ForbiddenException('No se puede editar un torneo finalizado');
@@ -634,6 +629,10 @@ export class TournamentsService {
       zona: dto.zona,
       imagen: dto.imagen,
     };
+
+    if (dto.fechaInicio !== undefined) {
+      updateData.fechaInicio = new Date(dto.fechaInicio);
+    }
 
     if (dto.fechaFin !== undefined) {
       updateData.fechaFin = await this.resolveFechaFinForUpdate(

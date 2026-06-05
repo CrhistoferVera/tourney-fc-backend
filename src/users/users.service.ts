@@ -150,7 +150,8 @@ export class UsersService {
       equipoIds.length > 0
         ? await this.prisma.partido.findFirst({
             where: {
-              estado: 'PENDIENTE',
+              faseJuego: 'PREVIA',
+              estado: { not: 'EN_CURSO' },
               fecha: { gte: new Date() },
               OR: [
                 { equipoLocalId: { in: equipoIds } },
@@ -182,7 +183,7 @@ export class UsersService {
       equipoIds.length > 0
         ? await this.prisma.partido.findMany({
             where: {
-              estado: 'CONFIRMADO',
+              faseJuego: 'FINALIZADO',
               OR: [
                 { equipoLocalId: { in: equipoIds } },
                 { equipoVisitanteId: { in: equipoIds } },
