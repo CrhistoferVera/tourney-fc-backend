@@ -98,7 +98,10 @@ export class FixturesService {
         equipoVisitante: { select: { id: true, nombre: true, escudo: true } },
         campo: { select: { id: true, nombre: true, direccion: true } },
       },
-      orderBy: [{ ronda: 'asc' }, { fecha: 'asc' }],
+      // Orden estructural estable (por creación), consistente con syncCopaBracket.
+      // Ordenar por fecha hacía que las casillas del bracket se reordenaran al
+      // programar/finalizar partidos, ocultando resultados hasta que todos terminaban.
+      orderBy: [{ ronda: 'asc' }, { createdAt: 'asc' }],
     });
 
     // Agrupar por ronda
