@@ -1,16 +1,253 @@
-
 generator client {
   provider = "prisma-client-js"
-  //output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-// ─────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────
+model Usuario {
+  id                    String                @id @default(uuid())
+  nombre                String
+  email                 String                @unique
+  passwordHash          String
+  fotoPerfil            String?
+  zona                  String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  enlacesInvitacion     EnlaceInvitacion[]
+  equiposCapitan        Equipo[]              @relation("EquipoCapitan")
+  eventosPartido        EventoPartido[]
+  rosterInscripciones   InscripcionRoster[]
+  invitacionesEnviadas  InvitacionPendiente[] @relation("Invitador")
+  invitacionesRecibidas InvitacionPendiente[] @relation("Invitado")
+  notificaciones        Notificacion[]
+  equipos               UsuarioEquipo[]
+  roles                 UsuarioTorneo[]
+
+  @@map("usuarios")
+}
+
+model Torneo {
+  id                    String                @id @default(uuid())
+  nombre                String
+  descripcion           String?
+  formato               FormatoTorneo
+  maxEquipos            Int
+  estado                EstadoTorneo          @default(BORRADOR)
+  fechaInicio           DateTime
+  fechaFin              DateTime
+  zona                  String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  imagen                String?
+  maxJugadoresPorEquipo Int?
+  modalidad             ModalidadFutbol?
+  campos                CampoJuego[]
+  inscripciones         Inscripcion[]
+  invitaciones          InvitacionPendiente[]
+  notificaciones        Notificacion[]
+  partidos              Partido[]
+  participantes         UsuarioTorneo[]
+
+  @@map("torneos")
+}
+
+model UsuarioTorneo {
+  id        String    @id @default(uuid())
+  usuarioId String
+  torneoId  String
+  rol       RolTorneo
+  createdAt DateTime  @default(now())
+  torneo    Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  usuario   Usuario   @relation(fields: [usuarioId], references: [id])
+
+  @@unique([usuarioId, torneoId])
+  @@map("usuario_torneo")
+}
+
+model CampoJuego {
+  id        String    @id @default(uuid())
+  torneoId  String
+  nombre    String
+  direccion String?
+  createdAt DateTime  @default(now())
+  latitud   Float?
+  longitud  Float?
+  torneo    Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  partidos  Partido[]
+
+  @@map("campos_juego")
+}
+
+model Equipo {
+  id                String                @id @default(uuid())
+  nombre            String
+  escudo            String?
+  createdAt         DateTime              @default(now())
+  telefonoCapitan   String?
+  cantidadJugadores Int?
+  capitanId         String
+  updatedAt         DateTime              @updatedAt
+  enlaceInvitacion  EnlaceInvitacion?
+  capitan           Usuario               @relation("EquipoCapitan", fields: [capitanId], references: [id])
+  eventos           EventoPartido[]
+  inscripciones     Inscripcion[]
+  invitaciones      InvitacionPendiente[]
+  partidosLocal     Partido[]             @relation("EquipoLocal")
+  partidosVisitante Partido[]             @relation("EquipoVisitante")
+  jugadores         UsuarioEquipo[]
+
+  @@map("equipos")
+}
+
+model UsuarioEquipo {
+  id        String   @id @default(uuid())
+  usuarioId String
+  equipoId  String
+  createdAt DateTime @default(now())
+  equipo    Equipo   @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+
+  @@unique([usuarioId, equipoId])
+  @@map("usuario_equipo")
+}
+
+model Inscripcion {
+  id        String              @id @default(uuid())
+  torneoId  String
+  equipoId  String
+  estado    EstadoInscripcion   @default(PENDIENTE)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  roster    InscripcionRoster[]
+  equipo    Equipo              @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  torneo    Torneo              @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+
+  @@unique([torneoId, equipoId])
+  @@map("inscripciones")
+}
+
+model InscripcionRoster {
+  id            String      @id @default(uuid())
+  inscripcionId String
+  usuarioId     String
+  createdAt     DateTime    @default(now())
+  inscripcion   Inscripcion @relation(fields: [inscripcionId], references: [id], onDelete: Cascade)
+  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
+
+  @@unique([inscripcionId, usuarioId])
+  @@map("inscripcion_roster")
+}
+
+model EnlaceInvitacion {
+  id        String    @id @default(uuid())
+  creadoPor String
+  codigo    String    @unique @default(uuid())
+  usos      Int       @default(0)
+  maxUsos   Int?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  equipoId  String    @unique
+  usuario   Usuario   @relation(fields: [creadoPor], references: [id])
+  equipo    Equipo    @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+
+  @@map("enlaces_invitacion")
+}
+
+model Partido {
+  id                     String          @id @default(uuid())
+  torneoId               String
+  campoId                String?
+  equipoLocalId          String
+  equipoVisitanteId      String
+  fecha                  DateTime?
+  estado                 EstadoPartido   @default(PENDIENTE)
+  ronda                  Int?
+  fase                   String?
+  golesLocal             Int?
+  golesVisitante         Int?
+  confirmadoPorLocal     Boolean         @default(false)
+  confirmadoPorVisitante Boolean         @default(false)
+  resultadoDisputado     Boolean         @default(false)
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  cronometroIniciadoEn   DateTime?
+  faseJuego              FaseJuego       @default(PREVIA)
+  golesPenalesLocal      Int?
+  golesPenalesVisitante  Int?
+  minutosJugados         Int             @default(0)
+  finalizadoEn           DateTime?
+  eventos                EventoPartido[]
+  campo                  CampoJuego?     @relation(fields: [campoId], references: [id])
+  equipoLocal            Equipo          @relation("EquipoLocal", fields: [equipoLocalId], references: [id])
+  equipoVisitante        Equipo          @relation("EquipoVisitante", fields: [equipoVisitanteId], references: [id])
+  torneo                 Torneo          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+
+  @@map("partidos")
+}
+
+model EventoPartido {
+  id        String     @id @default(uuid())
+  partidoId String
+  jugadorId String?
+  tipo      TipoEvento
+  minuto    Int?
+  detalle   String?
+  createdAt DateTime   @default(now())
+  equipoId  String
+  equipo    Equipo     @relation(fields: [equipoId], references: [id])
+  jugador   Usuario?   @relation(fields: [jugadorId], references: [id])
+  partido   Partido    @relation(fields: [partidoId], references: [id])
+
+  @@map("eventos_partido")
+}
+
+model Notificacion {
+  id        String           @id @default(uuid())
+  usuarioId String
+  torneoId  String?
+  tipo      TipoNotificacion
+  mensaje   String
+  leida     Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  torneo    Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  usuario   Usuario          @relation(fields: [usuarioId], references: [id])
+
+  @@map("notificaciones")
+}
+
+model ResetPassword {
+  id        String   @id @default(uuid())
+  email     String
+  codigo    String
+  expiresAt DateTime
+  usado     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("reset_password")
+}
+
+model InvitacionPendiente {
+  id          String           @id @default(uuid())
+  torneoId    String?
+  equipoId    String?
+  tipo        TipoInvitacion
+  estado      EstadoInvitacion @default(PENDIENTE)
+  email       String
+  invitadoPor String
+  usuarioId   String?
+  createdAt   DateTime         @default(now())
+  equipo      Equipo?          @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  invitador   Usuario          @relation("Invitador", fields: [invitadoPor], references: [id])
+  torneo      Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
+  usuario     Usuario?         @relation("Invitado", fields: [usuarioId], references: [id])
+
+  @@index([email, estado])
+  @@index([equipoId, email, estado])
+  @@index([torneoId, email, tipo])
+  @@map("invitaciones_pendientes")
+}
 
 enum RolTorneo {
   ORGANIZADOR
@@ -94,319 +331,4 @@ enum EstadoInvitacion {
   PENDIENTE
   ACEPTADA
   RECHAZADA
-}
-
-// ─────────────────────────────────────────
-// USUARIO
-// ─────────────────────────────────────────
-
-model Usuario {
-  id            String   @id @default(uuid())
-  nombre        String
-  email         String   @unique
-  passwordHash  String
-  fotoPerfil    String?
-  zona          String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relaciones
-  roles                 UsuarioTorneo[]
-  equipos               UsuarioEquipo[]
-  equiposCapitan        Equipo[]              @relation("EquipoCapitan")
-  rosterInscripciones   InscripcionRoster[]
-  eventosPartido        EventoPartido[]
-  notificaciones        Notificacion[]
-  enlacesInvitacion     EnlaceInvitacion[]
-  invitacionesEnviadas  InvitacionPendiente[] @relation("Invitador")
-  invitacionesRecibidas InvitacionPendiente[] @relation("Invitado")
-
-  @@map("usuarios")
-}
-
-// ─────────────────────────────────────────
-// TORNEO
-// ─────────────────────────────────────────
-
-model Torneo {
-  id                    String             @id @default(uuid())
-  nombre                String
-  descripcion           String?
-  formato               FormatoTorneo
-  modalidad             ModalidadFutbol?
-  maxEquipos            Int
-  maxJugadoresPorEquipo Int?
-  estado                EstadoTorneo       @default(BORRADOR)
-  fechaInicio           DateTime
-  fechaFin              DateTime
-  zona                  String?
-  imagen                String?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
-
-  // Relaciones
-  campos            CampoJuego[]
-  participantes     UsuarioTorneo[]
-  inscripciones     Inscripcion[]
-  partidos          Partido[]
-  notificaciones    Notificacion[]
-  invitaciones      InvitacionPendiente[]
-
-  @@map("torneos")
-}
-
-// ─────────────────────────────────────────
-// ROL CONTEXTUAL (usuario ↔ torneo)
-// ─────────────────────────────────────────
-
-model UsuarioTorneo {
-  id        String    @id @default(uuid())
-  usuarioId String
-  torneoId  String
-  rol       RolTorneo
-  createdAt DateTime  @default(now())
-
-  usuario   Usuario   @relation(fields: [usuarioId], references: [id])
-  torneo    Torneo    @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-
-  @@unique([usuarioId, torneoId])
-  @@map("usuario_torneo")
-}
-
-// ─────────────────────────────────────────
-// CAMPO DE JUEGO
-// ─────────────────────────────────────────
-
-model CampoJuego {
-  id        String   @id @default(uuid())
-  torneoId  String
-  nombre    String
-  direccion String?
-  latitud   Float?
-  longitud  Float?
-  createdAt DateTime @default(now())
-
-  torneo    Torneo   @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  partidos  Partido[]
-
-  @@map("campos_juego")
-}
-
-// ─────────────────────────────────────────
-// EQUIPO (global, independiente de torneos)
-// ─────────────────────────────────────────
-
-model Equipo {
-  id                String   @id @default(uuid())
-  nombre            String
-  escudo            String?
-  telefonoCapitan   String?
-  cantidadJugadores Int?
-  capitanId         String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  capitan           Usuario               @relation("EquipoCapitan", fields: [capitanId], references: [id])
-  jugadores         UsuarioEquipo[]
-  inscripciones     Inscripcion[]
-  enlaceInvitacion  EnlaceInvitacion?
-  partidosLocal     Partido[]             @relation("EquipoLocal")
-  partidosVisitante Partido[]             @relation("EquipoVisitante")
-  invitaciones      InvitacionPendiente[]
-  eventos           EventoPartido[]
-
-  @@map("equipos")
-}
-
-// ─────────────────────────────────────────
-// USUARIO ↔ EQUIPO
-// ─────────────────────────────────────────
-
-model UsuarioEquipo {
-  id        String   @id @default(uuid())
-  usuarioId String
-  equipoId  String
-  createdAt DateTime @default(now())
-
-  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
-  equipo    Equipo   @relation(fields: [equipoId], references: [id], onDelete: Cascade)
-
-  @@unique([usuarioId, equipoId])
-  @@map("usuario_equipo")
-}
-
-// ─────────────────────────────────────────
-// INSCRIPCION (equipo ↔ torneo, N-N)
-// ─────────────────────────────────────────
-
-model Inscripcion {
-  id        String            @id @default(uuid())
-  torneoId  String
-  equipoId  String
-  estado    EstadoInscripcion @default(PENDIENTE)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-
-  torneo    Torneo              @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  equipo    Equipo              @relation(fields: [equipoId], references: [id], onDelete: Cascade)
-  roster    InscripcionRoster[]
-
-  @@unique([torneoId, equipoId])
-  @@map("inscripciones")
-}
-
-// ─────────────────────────────────────────
-// ROSTER DE INSCRIPCION (subset jugadores)
-// ─────────────────────────────────────────
-
-model InscripcionRoster {
-  id            String   @id @default(uuid())
-  inscripcionId String
-  usuarioId     String
-  createdAt     DateTime @default(now())
-
-  inscripcion   Inscripcion @relation(fields: [inscripcionId], references: [id], onDelete: Cascade)
-  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
-
-  @@unique([inscripcionId, usuarioId])
-  @@map("inscripcion_roster")
-}
-
-// ─────────────────────────────────────────
-// ENLACE DE INVITACION (a equipo)
-// ─────────────────────────────────────────
-
-model EnlaceInvitacion {
-  id         String    @id @default(uuid())
-  equipoId   String    @unique
-  creadoPor  String
-  codigo     String    @unique @default(uuid())
-  usos       Int       @default(0)
-  maxUsos    Int?
-  expiresAt  DateTime?
-  createdAt  DateTime  @default(now())
-
-  equipo     Equipo    @relation(fields: [equipoId], references: [id], onDelete: Cascade)
-  usuario    Usuario   @relation(fields: [creadoPor], references: [id])
-
-  @@map("enlaces_invitacion")
-}
-
-// ─────────────────────────────────────────
-// PARTIDO
-// ─────────────────────────────────────────
-
-model Partido {
-  id               String        @id @default(uuid())
-  torneoId         String
-  campoId          String?
-  equipoLocalId    String
-  equipoVisitanteId String
-  fecha            DateTime?
-  estado           EstadoPartido @default(PENDIENTE)
-  ronda            Int?
-  fase             String?
-
-  // Cronómetro y estado en vivo
-  faseJuego        FaseJuego     @default(PREVIA)
-  minutosJugados   Int           @default(0)
-  cronometroIniciadoEn DateTime?
-  finalizadoEn     DateTime?
-
-  golesLocal       Int?
-  golesVisitante   Int?
-  golesPenalesLocal     Int?
-  golesPenalesVisitante Int?
-
-  confirmadoPorLocal      Boolean @default(false)
-  confirmadoPorVisitante  Boolean @default(false)
-  resultadoDisputado      Boolean @default(false)
-
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-
-  torneo           Torneo        @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  campo            CampoJuego?   @relation(fields: [campoId], references: [id])
-  equipoLocal      Equipo        @relation("EquipoLocal", fields: [equipoLocalId], references: [id])
-  equipoVisitante  Equipo        @relation("EquipoVisitante", fields: [equipoVisitanteId], references: [id])
-  eventos          EventoPartido[]
-
-  @@map("partidos")
-}
-
-// ─────────────────────────────────────────
-// EVENTO DE PARTIDO
-// ─────────────────────────────────────────
-
-model EventoPartido {
-  id         String     @id @default(uuid())
-  partidoId  String
-  equipoId   String
-  jugadorId  String?
-  tipo       TipoEvento
-  minuto     Int?
-  detalle    String?
-  createdAt  DateTime   @default(now())
-
-  partido    Partido    @relation(fields: [partidoId], references: [id])
-  equipo     Equipo     @relation(fields: [equipoId], references: [id])
-  jugador    Usuario?   @relation(fields: [jugadorId], references: [id])
-
-  @@map("eventos_partido")
-}
-
-// ─────────────────────────────────────────
-// NOTIFICACION
-// ─────────────────────────────────────────
-
-model Notificacion {
-  id         String           @id @default(uuid())
-  usuarioId  String
-  torneoId   String?
-  tipo       TipoNotificacion
-  mensaje    String
-  leida      Boolean          @default(false)
-  createdAt  DateTime         @default(now())
-
-  usuario    Usuario          @relation(fields: [usuarioId], references: [id])
-  torneo     Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-
-  @@map("notificaciones")
-}
-
-model ResetPassword {
-  id        String   @id @default(uuid())
-  email     String
-  codigo    String
-  expiresAt DateTime
-  usado     Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  @@map("reset_password")
-}
-
-// ─────────────────────────────────────────
-// INVITACION PENDIENTE (a torneo como staff, o a equipo como jugador)
-// ─────────────────────────────────────────
-
-model InvitacionPendiente {
-  id          String           @id @default(uuid())
-  torneoId    String?
-  equipoId    String?
-  tipo        TipoInvitacion
-  estado      EstadoInvitacion @default(PENDIENTE)
-  email       String
-  invitadoPor String
-  usuarioId   String?
-  createdAt   DateTime         @default(now())
-
-  torneo      Torneo?          @relation(fields: [torneoId], references: [id], onDelete: Cascade)
-  equipo      Equipo?          @relation(fields: [equipoId], references: [id], onDelete: Cascade)
-  invitador   Usuario          @relation("Invitador", fields: [invitadoPor], references: [id])
-  usuario     Usuario?         @relation("Invitado", fields: [usuarioId], references: [id])
-
-  @@index([email, estado])
-  @@index([equipoId, email, estado])
-  @@index([torneoId, email, tipo])
-  @@map("invitaciones_pendientes")
 }
