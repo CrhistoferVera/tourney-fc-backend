@@ -122,7 +122,7 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    // Por seguridad siempre respondemos lo mismo aunque no exista el usuario
+    // Siempre respondemos el mismo mensaje para no revelar si el email existe
     if (!user) {
       return {
         mensaje:
@@ -130,15 +130,15 @@ export class AuthService {
       };
     }
 
-    // Invalidar códigos anteriores del mismo email
+    // Invalidar cualquier código anterior pendiente para evitar que haya múltiples
+    // códigos válidos al mismo tiempo para el mismo correo
     await this.prisma.resetPassword.updateMany({
       where: { email: dto.email, usado: false },
       data: { usado: true },
     });
 
-    // Generar código de 6 dígitos
     const codigo = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // expira en 5 minutos
 
     await this.prisma.resetPassword.create({
       data: { email: dto.email, codigo, expiresAt },

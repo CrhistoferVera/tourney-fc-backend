@@ -248,6 +248,8 @@ export class TeamsService {
 
   // ─── Enlace de invitación ──────────────────────────────────────────────────
 
+  // Solo puede haber un enlace activo por equipo. El upsert reemplaza el anterior
+  // y reinicia el contador de usos, lo que invalida cualquier link viejo compartido.
   async createInviteLink(
     equipoId: string,
     userId: string,
@@ -317,6 +319,8 @@ export class TeamsService {
     };
   }
 
+  // Se registra al usuario en el equipo y se incrementa el contador de usos en una
+  // transacción para que no queden usuarios sin equipo si falla el update del enlace.
   async joinByCode(code: string, userId: string) {
     const link = await this.prisma.enlaceInvitacion.findUnique({
       where: { codigo: code },

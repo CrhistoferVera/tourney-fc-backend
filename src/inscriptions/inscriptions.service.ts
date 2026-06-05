@@ -15,12 +15,14 @@ import {
   RolTorneo,
 } from '@prisma/client';
 
+// Mínimo de jugadores requeridos según modalidad (titulares exactos)
 const MIN_JUGADORES_POR_MODALIDAD: Record<ModalidadFutbol, number> = {
   FUTBOL_5: 5,
   FUTBOL_7: 7,
   FUTBOL_11: 11,
 };
 
+// Máximo por defecto si el torneo no configura uno explícito (titulares + suplentes habituales)
 const MAX_JUGADORES_DEFAULT_POR_MODALIDAD: Record<ModalidadFutbol, number> = {
   FUTBOL_5: 10,
   FUTBOL_7: 14,
@@ -63,7 +65,9 @@ export class InscriptionsService {
     this.validarRoster(equipo, dto.jugadoresIds, torneo.modalidad, torneo.maxJugadoresPorEquipo);
     await this.assertSinConflictoJugadores(torneoId, dto.jugadoresIds, existente?.id);
 
-    // Crear (o resucitar) inscripción + roster en una transacción
+    // Si ya existe una inscripción RECHAZADA para este equipo, se "resucita":
+    // se borra el roster anterior y se vuelve a PENDIENTE con el nuevo roster.
+    // Esto evita crear registros duplicados en la tabla de inscripciones.
     const inscripcion = await this.prisma.$transaction(async (tx) => {
       if (existente) {
         await tx.inscripcionRoster.deleteMany({ where: { inscripcionId: existente.id } });
@@ -274,6 +278,8 @@ export class InscriptionsService {
     }
   }
 
+  // Un jugador no puede estar en el roster de dos equipos distintos dentro del mismo torneo.
+  // Se excluye la inscripción actual para permitir re-envíos sin falso positivo.
   private async assertSinConflictoJugadores(
     torneoId: string,
     jugadoresIds: string[],
