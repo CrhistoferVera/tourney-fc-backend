@@ -25,12 +25,34 @@ npx prisma generate
 
 ## Variables de entorno
 
-Crea un archivo `.env` en la raíz del proyecto con el siguiente contenido:
+Crea un archivo `.env` en la raíz del proyecto (puedes copiar `.env.example`)
+con las siguientes variables:
 
 ```env
+# Base de datos PostgreSQL
 DATABASE_URL="postgresql://usuario:contraseña@host:puerto/nombre_db?sslmode=disable"
+
+# Autenticación
 JWT_SECRET="un_secreto_largo_y_seguro"
+
+# Servidor
 PORT=3000
+
+# Envío de correos (invitaciones, recuperación de contraseña)
+EMAIL_HOST="smtp.ejemplo.com"
+EMAIL_PORT=587
+EMAIL_USER="usuario@ejemplo.com"
+EMAIL_PASS="contraseña_del_correo"
+EMAIL_FROM="Tourney FC <no-reply@ejemplo.com>"
+
+# Almacenamiento de imágenes / escudos
+CLOUDINARY_URL="cloudinary://api_key:api_secret@cloud_name"
+
+# Enlaces de invitación y de la app móvil
+INVITE_LINK_BASE_URL="https://tu-dominio.com/invite"
+APP_DEEPLINK="tourneyfcapp://"
+ANDROID_STORE_URL="https://play.google.com/store/apps/details?id=com.crhistofervera.tourneyfcapp"
+IOS_STORE_URL="https://apps.apple.com/app/idXXXXXXXX"
 ```
 
 Solicita los valores reales al administrador del proyecto. No compartas ni subas el `.env` al repositorio.
@@ -80,6 +102,18 @@ npx prisma studio
 ```
 
 Se abre en `http://localhost:5555` por defecto. Es útil para verificar datos durante el desarrollo, pero no debe usarse para modificar datos en producción.
+
+### Datos de prueba (seeds)
+
+El proyecto incluye varios scripts para poblar la base de datos con torneos de ejemplo, útiles para la demostración:
+
+```bash
+npm run seed:demo        # Liga de demostración
+npm run seed:demo-copa   # Copa de demostración
+npm run seed:liga8       # Liga con 8 equipos
+npm run seed:copa8       # Copa con 8 equipos
+npm run seed:clean       # Limpia los datos cargados
+```
 
 ---
 
