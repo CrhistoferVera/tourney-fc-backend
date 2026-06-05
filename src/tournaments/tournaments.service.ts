@@ -251,9 +251,15 @@ export class TournamentsService {
   }
 
   async findAll(query: QueryTournamentDto) {
+    const cincoDiasAtras = new Date();
+    cincoDiasAtras.setDate(cincoDiasAtras.getDate() - 5);
+
     const torneos = await this.prisma.torneo.findMany({
       where: {
-        estado: { in: [EstadoTorneo.EN_INSCRIPCION, EstadoTorneo.EN_CURSO] },
+        OR: [
+          { estado: { in: [EstadoTorneo.EN_INSCRIPCION, EstadoTorneo.EN_CURSO] } },
+          { estado: EstadoTorneo.FINALIZADO, updatedAt: { gte: cincoDiasAtras } },
+        ],
         ...(query.nombre && {
           nombre: { contains: query.nombre, mode: 'insensitive' },
         }),
@@ -344,6 +350,7 @@ export class TournamentsService {
       rolUsuario: p.rol,
       tieneSolicitudPendiente: false,
       campos: p.torneo.campos,
+      updatedAt: p.torneo.updatedAt,
     }));
 
     // Torneos donde el usuario está en un roster PENDIENTE o APROBADO
@@ -386,6 +393,7 @@ export class TournamentsService {
           : null,
       tieneSolicitudPendiente: ins.estado === 'PENDIENTE',
       campos: ins.torneo.campos,
+      updatedAt: ins.torneo.updatedAt,
     }));
 
     const pendientesStaff = invitacionesPendientes
@@ -406,6 +414,7 @@ export class TournamentsService {
         imagen: i.torneo.imagen,
         rolUsuario: RolTorneo.STAFF,
         campos: i.torneo.campos,
+        updatedAt: i.torneo.updatedAt,
       }));
 
     // Prioridad visual: los activos primero, los finalizados al final
@@ -413,9 +422,18 @@ export class TournamentsService {
       EN_CURSO: 0, EN_INSCRIPCION: 1, BORRADOR: 2, FINALIZADO: 3,
     };
 
-    return [...confirmados, ...pendientesStaff, ...desdeRoster].sort(
-      (a, b) => (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4),
-    );
+    const cincoDiasAtras = new Date();
+    cincoDiasAtras.setDate(cincoDiasAtras.getDate() - 5);
+
+    const allTorneos = [...confirmados, ...pendientesStaff, ...desdeRoster];
+    
+    return allTorneos
+      .filter(t => {
+        if (t.estado !== 'FINALIZADO') return true;
+        if (!t.updatedAt) return true;
+        return t.updatedAt >= cincoDiasAtras;
+      })
+      .sort((a, b) => (orden[a.estado] ?? 4) - (orden[b.estado] ?? 4));
   }
 
   async findOne(id: string, userId: string) {
