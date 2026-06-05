@@ -298,6 +298,22 @@ export class TournamentsController {
     return this.tournamentsService.addCampo(id, req.user.id, body);
   }
 
+  @Delete(':id/campos/:campoId')
+  @ApiOperation({
+    summary: 'Eliminar cancha de un torneo',
+    description: 'Permite eliminar una cancha de juego si no tiene partidos programados — solo ORGANIZADOR',
+  })
+  @ApiParam({ name: 'id', description: 'UUID del torneo' })
+  @ApiParam({ name: 'campoId', description: 'UUID de la cancha' })
+  @ApiResponse({ status: 200, description: 'Cancha eliminada exitosamente' })
+  deleteCampo(
+    @Param('id') id: string,
+    @Param('campoId') campoId: string,
+    @Request() req: any,
+  ) {
+    return this.tournamentsService.deleteCampo(id, req.user.id, campoId);
+  }
+
   @Get(':id/campos')
   @ApiOperation({
     summary: 'Listar canchas del torneo',

@@ -847,6 +847,34 @@ export class TournamentsService {
     });
   }
 
+  async deleteCampo(torneoId: string, userId: string, campoId: string) {
+    await this.checkOrganizador(torneoId, userId);
+
+    const campo = await this.prisma.campoJuego.findFirst({
+      where: { id: campoId, torneoId },
+    });
+
+    if (!campo) {
+      throw new NotFoundException('Cancha no encontrada');
+    }
+
+    const partidos = await this.prisma.partido.count({
+      where: { campoId },
+    });
+
+    if (partidos > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar la cancha porque ya tiene partidos programados.',
+      );
+    }
+
+    await this.prisma.campoJuego.delete({
+      where: { id: campoId },
+    });
+
+    return { message: 'Cancha eliminada exitosamente' };
+  }
+
   async getCampos(torneoId: string) {
     return this.prisma.campoJuego.findMany({
       where: { torneoId },

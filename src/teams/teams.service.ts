@@ -390,7 +390,17 @@ export class TeamsService {
     const inscripcion = await this.prisma.inscripcion.findUnique({
       where: { torneoId_equipoId: { torneoId, equipoId } },
       include: {
-        equipo: true,
+        equipo: {
+          include: {
+            jugadores: {
+              include: {
+                usuario: {
+                  select: { id: true, nombre: true, fotoPerfil: true, email: true },
+                },
+              },
+            },
+          },
+        },
         roster: {
           include: {
             usuario: {
@@ -404,7 +414,10 @@ export class TeamsService {
 
     if (!inscripcion) throw new NotFoundException('Equipo no encontrado en este torneo');
 
-    const jugadorIds = inscripcion.roster.map((r) => r.usuarioId);
+    const useRoster = inscripcion.roster.length > 0;
+    const baseJugadores = useRoster ? inscripcion.roster : inscripcion.equipo.jugadores;
+    const jugadorIds = baseJugadores.map((r) => r.usuarioId);
+
     const estadisticasPorJugador = await this.getEstadisticasJugadoresTorneo(
       torneoId,
       equipoId,
@@ -416,9 +429,9 @@ export class TeamsService {
       nombre: inscripcion.equipo.nombre,
       escudo: inscripcion.equipo.escudo,
       telefonoCapitan: inscripcion.equipo.telefonoCapitan,
-      cantidadJugadores: inscripcion.roster.length,
+      cantidadJugadores: baseJugadores.length,
       capitanId: inscripcion.equipo.capitanId,
-      jugadores: inscripcion.roster.map((r) => ({
+      jugadores: baseJugadores.map((r) => ({
         id: r.id,
         usuarioId: r.usuarioId,
         equipoId,
@@ -444,7 +457,17 @@ export class TeamsService {
     const inscripciones = await this.prisma.inscripcion.findMany({
       where: { torneoId, estado: 'APROBADA' },
       include: {
-        equipo: true,
+        equipo: {
+          include: {
+            jugadores: {
+              include: {
+                usuario: {
+                  select: { id: true, nombre: true, fotoPerfil: true },
+                },
+              },
+            },
+          },
+        },
         roster: {
           include: {
             usuario: {
@@ -456,19 +479,29 @@ export class TeamsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return inscripciones.map((ins) => ({
-      id: ins.equipo.id,
-      nombre: ins.equipo.nombre,
-      escudo: ins.equipo.escudo,
-      telefonoCapitan: ins.equipo.telefonoCapitan,
-      cantidadJugadores: ins.roster.length,
-      jugadores: ins.roster.map((r) => ({
-        id: r.usuario.id,
-        nombre: r.usuario.nombre,
-        fotoPerfil: r.usuario.fotoPerfil,
-      })),
-      createdAt: ins.equipo.createdAt,
-    }));
+    return inscripciones.map((ins) => {
+      const rosterJugadores = ins.roster.length > 0 
+        ? ins.roster.map((r) => ({
+            id: r.usuario.id,
+            nombre: r.usuario.nombre,
+            fotoPerfil: r.usuario.fotoPerfil,
+          }))
+        : ins.equipo.jugadores.map((j) => ({
+            id: j.usuario.id,
+            nombre: j.usuario.nombre,
+            fotoPerfil: j.usuario.fotoPerfil,
+          }));
+
+      return {
+        id: ins.equipo.id,
+        nombre: ins.equipo.nombre,
+        escudo: ins.equipo.escudo,
+        telefonoCapitan: ins.equipo.telefonoCapitan,
+        cantidadJugadores: rosterJugadores.length,
+        jugadores: rosterJugadores,
+        createdAt: ins.equipo.createdAt,
+      };
+    });
   }
 
   async getMyTeam(torneoId: string, userId: string) {
