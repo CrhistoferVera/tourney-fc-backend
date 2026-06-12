@@ -24,4 +24,6 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start:prod"]
+# Aplica las migraciones pendientes antes de arrancar el servidor.
+# Así nuevas tablas (p. ej. registro_otp) se crean automáticamente en cada deploy.
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
