@@ -163,13 +163,12 @@ export class TournamentsService {
     const inscripciones = await this.prisma.inscripcion.findMany({
       where: { torneoId, estado: 'PENDIENTE' },
       include: {
-        equipo: {
+        equipo: true,
+        // Solo los jugadores que el capitán seleccionó para este torneo (roster),
+        // no todos los miembros del equipo.
+        roster: {
           include: {
-            jugadores: {
-              include: {
-                usuario: { select: { id: true, nombre: true, fotoPerfil: true, email: true } },
-              },
-            },
+            usuario: { select: { id: true, nombre: true, fotoPerfil: true, email: true } },
           },
         },
       },
@@ -185,12 +184,12 @@ export class TournamentsService {
         nombre: i.equipo.nombre,
         escudo: i.equipo.escudo,
         telefonoCapitan: i.equipo.telefonoCapitan,
-        cantidadJugadores: i.equipo.cantidadJugadores ?? i.equipo.jugadores.length,
-        jugadores: i.equipo.jugadores.map((j) => ({
-          id: j.usuario.id,
-          nombre: j.usuario.nombre,
-          email: j.usuario.email,
-          fotoPerfil: j.usuario.fotoPerfil,
+        cantidadJugadores: i.roster.length,
+        jugadores: i.roster.map((r) => ({
+          id: r.usuario.id,
+          nombre: r.usuario.nombre,
+          email: r.usuario.email,
+          fotoPerfil: r.usuario.fotoPerfil,
         })),
       },
     }));
