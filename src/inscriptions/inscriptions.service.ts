@@ -64,6 +64,7 @@ export class InscriptionsService {
     await this.assertCupoDisponible(torneoId, torneo.maxEquipos);
     this.validarRoster(equipo, dto.jugadoresIds, torneo.modalidad, torneo.maxJugadoresPorEquipo);
     await this.assertSinConflictoJugadores(torneoId, dto.jugadoresIds, existente?.id);
+    await this.assertSinRolDeGestion(torneoId, dto.jugadoresIds);
 
     // Si ya existe una inscripción RECHAZADA para este equipo, se "resucita":
     // se borra el roster anterior y se vuelve a PENDIENTE con el nuevo roster.
@@ -300,6 +301,25 @@ export class InscriptionsService {
       const nombres = conflictos.map((c) => c.usuario.nombre).join(', ');
       throw new BadRequestException(
         `Estos jugadores ya están inscritos en este torneo con otro equipo: ${nombres}`,
+      );
+    }
+  }
+
+  // El organizador y el staff del torneo no pueden inscribirse como jugadores
+  // en su propio torneo (no pueden ser, a la vez, gestor y participante).
+  private async assertSinRolDeGestion(torneoId: string, jugadoresIds: string[]) {
+    const gestores = await this.prisma.usuarioTorneo.findMany({
+      where: {
+        torneoId,
+        usuarioId: { in: jugadoresIds },
+        rol: { in: [RolTorneo.ORGANIZADOR, RolTorneo.STAFF] },
+      },
+      include: { usuario: { select: { nombre: true } } },
+    });
+    if (gestores.length > 0) {
+      const nombres = gestores.map((g) => g.usuario.nombre).join(', ');
+      throw new BadRequestException(
+        `El organizador o staff del torneo no puede inscribirse como jugador: ${nombres}`,
       );
     }
   }
