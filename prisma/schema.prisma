@@ -332,3 +332,14 @@ enum EstadoInvitacion {
   ACEPTADA
   RECHAZADA
 }
+
+model RegistroOTP {
+  id        String   @id @default(uuid())
+  email     String
+  codigo    String
+  expiresAt DateTime
+  usado     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("registro_otp")
+}

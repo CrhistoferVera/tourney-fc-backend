@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDto } from './dto/register.dto';
+import { RegisterDto, RequestRegisterOtpDto, VerifyRegisterOtpDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
@@ -37,8 +37,88 @@ export class AuthService {
     });
   }
 
+  async requestRegisterOtp(dto: RequestRegisterOtpDto) {
+    this.logger.log(`Solicitando código de registro para: ${dto.email}`);
+
+    const existingUser = await this.prisma.usuario.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existingUser) {
+      throw new ConflictException(
+        'Este correo electrónico ya está registrado. Por favor, inicie sesión',
+      );
+    }
+
+    // Invalidar códigos anteriores
+    await this.prisma.registroOTP.updateMany({
+      where: { email: dto.email, usado: false },
+      data: { usado: true },
+    });
+
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // expira en 10 minutos
+
+    await this.prisma.registroOTP.create({
+      data: { email: dto.email, codigo, expiresAt },
+    });
+
+    // Enviar correo
+    await this.mailer.sendMail({
+      from: this.configService.get<string>('EMAIL_FROM'),
+      to: dto.email,
+      subject: 'Código de verificación de registro - TourneyFC',
+      html: `
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2 style="color: #0D7A3E;">TourneyFC</h2>
+          <p>Bienvenido a TourneyFC. Para completar tu registro, utiliza el siguiente código:</p>
+          <div style="background: #EBF0EC; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0D7A3E;">${codigo}</span>
+          </div>
+          <p style="color: #3D4F44; font-size: 14px;">Este código expira en <strong>10 minutos</strong>.</p>
+          <p style="color: #3D4F44; font-size: 14px;">Si no solicitaste registrarte en TourneyFC, ignora este correo.</p>
+        </div>
+      `,
+    });
+
+    return { mensaje: 'Código de verificación enviado al correo' };
+  }
+
+  async verifyRegisterOtp(dto: VerifyRegisterOtpDto) {
+    const otpRecord = await this.prisma.registroOTP.findFirst({
+      where: {
+        email: dto.email,
+        codigo: dto.codigo,
+        usado: false,
+        expiresAt: { gte: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otpRecord) {
+      throw new BadRequestException('Código inválido o expirado');
+    }
+
+    return { valido: true, mensaje: 'Código válido' };
+  }
+
   async register(registerDto: RegisterDto) {
     this.logger.log(`Intentando registrar usuario: ${registerDto.email}`);
+
+    // Verificar el OTP primero
+    const otpRecord = await this.prisma.registroOTP.findFirst({
+      where: {
+        email: registerDto.email,
+        codigo: registerDto.codigo,
+        usado: false,
+        expiresAt: { gte: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otpRecord) {
+      throw new BadRequestException('Código de verificación inválido o expirado');
+    }
 
     const existingUser = await this.prisma.usuario.findUnique({
       where: { email: registerDto.email },
@@ -60,6 +140,12 @@ export class AuthService {
         passwordHash,
         zona: registerDto.zona || null,
       },
+    });
+
+    // Marcar OTP como usado
+    await this.prisma.registroOTP.update({
+      where: { id: otpRecord.id },
+      data: { usado: true },
     });
 
     this.logger.log(`Usuario registrado exitosamente: ${user.email}`);

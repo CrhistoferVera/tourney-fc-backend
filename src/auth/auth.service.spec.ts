@@ -40,6 +40,7 @@ describe('AuthService', () => {
       email: 'juan@example.com',
       password: 'Password123',
       zona: 'Cochabamba',
+      codigo: '123456',
     };
 
     it('HU-1 criterio 4: registro exitoso retorna datos del usuario', async () => {
