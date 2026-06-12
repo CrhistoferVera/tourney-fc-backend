@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
-import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego, FormatoTorneo } from '@prisma/client';
+import { EstadoTorneo, RolTorneo, TipoInvitacion, EstadoInvitacion, TipoEvento, EstadoPartido, FaseJuego, FormatoTorneo, EstadoInscripcion } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -103,6 +103,32 @@ export class TournamentsService {
 
     const invitado = await this.prisma.usuario.findUnique({ where: { email } });
     if (!invitado) throw new NotFoundException('No se encontró un usuario con ese correo');
+
+    // Validar que el invitado no sea el propio organizador
+    if (invitado.id === userId) {
+      throw new BadRequestException('El organizador no puede agregarse a sí mismo como staff');
+    }
+
+    const organizadorInfo = await this.prisma.usuarioTorneo.findUnique({
+      where: { usuarioId_torneoId: { usuarioId: invitado.id, torneoId } },
+    });
+    if (organizadorInfo?.rol === RolTorneo.ORGANIZADOR) {
+      throw new BadRequestException('El organizador del torneo no puede ser staff');
+    }
+
+    // Validar que no sea ya un jugador/capitán en el torneo
+    const isInscrito = await this.prisma.inscripcionRoster.findFirst({
+      where: {
+        usuarioId: invitado.id,
+        inscripcion: {
+          torneoId,
+          estado: { in: [EstadoInscripcion.PENDIENTE, EstadoInscripcion.APROBADA] },
+        },
+      },
+    });
+    if (isInscrito) {
+      throw new BadRequestException('El usuario ya participa como jugador o capitán en este torneo');
+    }
 
     const existente = await this.prisma.invitacionPendiente.findFirst({
       where: { torneoId, email, tipo: TipoInvitacion.STAFF, estado: EstadoInvitacion.PENDIENTE },

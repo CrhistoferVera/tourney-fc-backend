@@ -1,7 +1,7 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
+import { RegisterDto, RequestRegisterOtpDto, VerifyRegisterOtpDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
@@ -36,6 +36,33 @@ export class AuthController {
   })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
+  }
+
+  @Post('register/request-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Solicitar código OTP para registro',
+    description: 'Envía un código de 6 dígitos al correo si no está registrado',
+  })
+  @ApiBody({ type: RequestRegisterOtpDto })
+  @ApiResponse({ status: 200, description: 'Código enviado' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiResponse({ status: 409, description: 'Correo ya registrado' })
+  async requestRegisterOtp(@Body() dto: RequestRegisterOtpDto) {
+    return this.authService.requestRegisterOtp(dto);
+  }
+
+  @Post('register/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verificar código OTP de registro',
+    description: 'Verifica que el código de 6 dígitos sea correcto y vigente',
+  })
+  @ApiBody({ type: VerifyRegisterOtpDto })
+  @ApiResponse({ status: 200, description: 'Código válido' })
+  @ApiResponse({ status: 400, description: 'Código inválido o expirado' })
+  async verifyRegisterOtp(@Body() dto: VerifyRegisterOtpDto) {
+    return this.authService.verifyRegisterOtp(dto);
   }
 
   @Post('login')

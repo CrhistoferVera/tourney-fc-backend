@@ -280,12 +280,28 @@ export class InscriptionsService {
   }
 
   // Un jugador no puede estar en el roster de dos equipos distintos dentro del mismo torneo.
-  // Se excluye la inscripción actual para permitir re-envíos sin falso positivo.
+  // Además, un organizador o staff no puede participar como jugador/capitán.
   private async assertSinConflictoJugadores(
     torneoId: string,
     jugadoresIds: string[],
     excluirInscripcionId?: string,
   ) {
+    const organizadoresYStaff = await this.prisma.usuarioTorneo.findMany({
+      where: {
+        torneoId,
+        usuarioId: { in: jugadoresIds },
+        rol: { in: [RolTorneo.ORGANIZADOR, RolTorneo.STAFF] },
+      },
+      include: { usuario: { select: { nombre: true } } },
+    });
+    
+    if (organizadoresYStaff.length > 0) {
+      const nombres = organizadoresYStaff.map((c) => c.usuario.nombre).join(', ');
+      throw new BadRequestException(
+        `Los siguientes jugadores son organizadores o staff y no pueden participar en el torneo: ${nombres}`,
+      );
+    }
+
     const conflictos = await this.prisma.inscripcionRoster.findMany({
       where: {
         usuarioId: { in: jugadoresIds },
